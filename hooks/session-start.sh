@@ -7,7 +7,7 @@ Before implementing ANY user request that creates or changes functionality — a
 The gate in short:
 1. Classify the request: greenfield / feature-in-existing / replace. On "feature", also check whether the user's whole project is a reinvention of an existing product — that is the most commonly missed case.
 2. Take stock of what is already installed (skills, plugins, tools) before searching the market.
-3. Search for existing solutions in this order: user's own KB -> ~/.claude/kb/useful-software.md (grep only, never read whole) -> GitHub search -> awesome-lists -> web. Target 4-8 candidates.
+3. Search for existing solutions in this order: ~/.claude/wheel/decisions/ (past verdicts, skip silently if absent) -> GitHub search -> awesome-lists -> web. Target 4-8 candidates.
 4. Interview the user with questions DERIVED FROM THE DIFFERENCES between candidates. A question is legal only if its answer changes the candidate list. Fewer candidates -> deeper interview. Zero candidates means the interview continues, NOT that you start coding.
 5. Score maturity (node scripts/maturity.mjs) and measure three gaps: functional, operational, architectural. Pick an adoption mode: deploy / package / compose / extend-core / hard-fork / assemble.
 6. "Write it from scratch" is NOT a valid verdict. The worst case is `assemble` — building from other people's pieces and reference points.
