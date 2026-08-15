@@ -20,8 +20,12 @@ const DAY = 864e5;
 
 // A repo of markdown skills/prompts has no releases and nothing to deploy.
 // Judging it by release cadence and Dockerfiles understates it every time.
+// A product that also ships its own skills is still a product: anything with a
+// Dockerfile, compose file or chart has something to deploy and something to release.
 export function kindOf(paths) {
-  return paths.some((p) => /^(SKILL\.md|skills|\.claude-plugin|commands)$/i.test(p)) ? "skills" : "service";
+  const skillish = paths.some((p) => /^(SKILL\.md|skills|\.claude-plugin|commands)$/i.test(p));
+  const s = opsGap(paths);
+  return skillish && !(s.compose || s.helm || s.k8s || s.docker) ? "skills" : "service";
 }
 
 export function flags(r, now) {
@@ -138,6 +142,9 @@ async function selfCheck() {
   assert.equal(kindOf(["SKILL.md", "references"]), "skills");
   assert.equal(kindOf(["skills", "README.md"]), "skills");
   assert.equal(kindOf(["src", "package.json"]), "service");
+  // a deployable product that also ships skills stays a service (karakeep)
+  assert.equal(kindOf(["skills", "charts", "docker", "package.json"]), "service");
+  assert.equal(kindOf(["SKILL.md", "package.json"]), "skills"); // lint tooling is not a deploy target
   const skillRepo = { pushed_at: fresh, stars: 1600, releases_12mo: 0, license: "MIT", archived: false, contributors: 5, kind: "skills" };
   assert.equal(Object.keys(flags(skillRepo, now)).length, 4);
   assert.equal(level(flags(skillRepo, now), skillRepo), "A");
