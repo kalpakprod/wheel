@@ -98,8 +98,9 @@ description: Use BEFORE writing any new code, adding a feature, starting a proje
 1. `~/.claude/wheel/decisions/` — решения, уже принятые этим пользователем. Читай `INDEX.md`, затем только релевантные записи. Каталога нет — молча пропусти.
 2. `~/.claude/wheel/catalog.jsonl` — проекты, которые пользователь уже видел: по строке на проект, только `grep`, файл не читается целиком.
 
-       grep -i '"tags":\[[^]]*"агент"' ~/.claude/wheel/catalog.jsonl
-       grep -i '"tier":"T1"' ~/.claude/wheel/catalog.jsonl
+       grep -i '"tags": \[[^]]*"агент"' ~/.claude/wheel/catalog.jsonl
+       grep -i '"tier": "T1"' ~/.claude/wheel/catalog.jsonl
+       grep -i 'оркестрац\|workflow' ~/.claude/wheel/catalog.jsonl
 
    Поля: `slug`, `url`, `summary`, `useful`, `tier`, `tags`, `level`, `deploy_gap`, `stars`, `mentions`, `chats`. Запись отсюда — уже оценённый кандидат: зрелость посчитана, тир проставлен, читать репозиторий заново не надо. `chats` считает, в скольких **разных** сообществах о проекте говорили: два независимых упоминания весят больше тысячи звёзд, потому что звёзды копятся годами, а разговор идёт про то, чем пользуются сейчас. Файла нет — молча пропусти.
 3. GitHub Search API: `gh search repos "<ключевые слова>" --sort stars --limit 20`, плюс поиск по topics из `capabilities.yaml`.
