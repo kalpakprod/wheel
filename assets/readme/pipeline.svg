@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1200" height="580" viewBox="0 0 1200 580"
+     role="img" aria-labelledby="pipeTitle pipeDesc">
+  <title id="pipeTitle">The wheel pipeline, from a request to an adoption mode</title>
+  <desc id="pipeDesc">Six steps run in order. S0 classifies the request as greenfield, a feature in existing code, or a replacement. S1 takes stock of installed skills. S2 and S3 overlap: the market search finds candidates and the interview removes them, narrowing eight to three. S4 scores maturity from A to D and measures the functional, operational and architectural gap. S5 separates features that come free from work deliberately left undone. S6 returns one of six adoption modes. Writing code from scratch is not among the possible outcomes.</desc>
+
+  <rect width="1200" height="580" rx="26" fill="#0B0C0D"/>
+  <rect x="0.75" y="0.75" width="1198.5" height="578.5" rx="25.25" fill="none" stroke="#24282B" stroke-width="1.5"/>
+
+  <text x="64" y="72" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+        font-size="19" letter-spacing="2.6" fill="#6E7276">PIPELINE</text>
+  <text x="1136" y="72" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+        font-size="19" fill="#4B5155">no step is skipped</text>
+
+  <g id="row-1" transform="translate(64 104)">
+    <g id="s0">
+      <rect width="344" height="128" rx="14" fill="#121417" stroke="#24282B" stroke-width="1.5"/>
+      <text x="24" y="40" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+            font-size="19" fill="#C9A227">S0</text>
+      <text x="66" y="40" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+            font-size="23" font-weight="600" fill="#F2F0EC">classify</text>
+      <text x="24" y="76" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+            font-size="20" fill="#9AA0A4">greenfield · feature · replace</text>
+      <text x="24" y="104" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+            font-size="20" fill="#6E7276">is the project itself a rewrite?</text>
+    </g>
+
+    <g id="s1" transform="translate(364 0)">
+      <rect width="344" height="128" rx="14" fill="#121417" stroke="#24282B" stroke-width="1.5"/>
+      <text x="24" y="40" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+            font-size="19" fill="#C9A227">S1</text>
+      <text x="66" y="40" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+            font-size="23" font-weight="600" fill="#F2F0EC">take stock</text>
+      <text x="24" y="76" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+            font-size="20" fill="#9AA0A4">skills already installed</text>
+      <text x="24" y="104" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+            font-size="20" fill="#6E7276">switch them on before searching</text>
+    </g>
+
+    <g id="s2s3" transform="translate(728 0)">
+      <rect width="344" height="128" rx="14" fill="#15161A" stroke="#3E4448" stroke-width="1.5"/>
+      <text x="24" y="40" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+            font-size="19" fill="#C9A227">S3 + S2</text>
+      <text x="118" y="40" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+            font-size="23" font-weight="600" fill="#F2F0EC">search &amp; grill</text>
+      <text x="24" y="76" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+            font-size="20" fill="#9AA0A4">questions come from the diff</text>
+      <text x="24" y="104" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+            font-size="20" fill="#C9A227">8 › 3</text>
+      <text x="98" y="104" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+            font-size="20" fill="#6E7276">candidates remaining</text>
+    </g>
+  </g>
+
+  <g id="row-2" transform="translate(64 264)">
+    <g id="s4">
+      <rect width="344" height="128" rx="14" fill="#121417" stroke="#24282B" stroke-width="1.5"/>
+      <text x="24" y="40" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+            font-size="19" fill="#C9A227">S4</text>
+      <text x="66" y="40" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+            font-size="23" font-weight="600" fill="#F2F0EC">measure</text>
+      <text x="24" y="76" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+            font-size="20" fill="#9AA0A4">maturity A–D · three gaps</text>
+      <text x="24" y="104" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+            font-size="20" fill="#6E7276">risk and work are separate axes</text>
+    </g>
+
+    <g id="s5" transform="translate(364 0)">
+      <rect width="344" height="128" rx="14" fill="#121417" stroke="#24282B" stroke-width="1.5"/>
+      <text x="24" y="40" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+            font-size="19" fill="#C9A227">S5</text>
+      <text x="66" y="40" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+            font-size="23" font-weight="600" fill="#F2F0EC">look forward</text>
+      <text x="24" y="76" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+            font-size="20" fill="#9AA0A4">free in the box · comes later</text>
+      <text x="24" y="104" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+            font-size="20" fill="#6E7276">the second list stays unbuilt</text>
+    </g>
+
+    <g id="s5-note" transform="translate(728 0)">
+      <rect width="344" height="128" rx="14" fill="#121417" stroke="#24282B" stroke-width="1.5"/>
+      <text x="24" y="40" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+            font-size="19" fill="#C9A227">S6</text>
+      <text x="66" y="40" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+            font-size="23" font-weight="600" fill="#F2F0EC">decide</text>
+      <text x="24" y="76" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+            font-size="20" fill="#9AA0A4">one mode, with its price</text>
+      <text x="24" y="104" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+            font-size="20" fill="#6E7276">recorded only if hard to reverse</text>
+    </g>
+  </g>
+
+  <g id="verdict-bar" transform="translate(64 424)">
+    <rect width="1072" height="80" rx="14" fill="#15161A" stroke="#C9A227" stroke-width="1.5"/>
+    <text x="28" y="48" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="19" letter-spacing="1.8" fill="#C9A227">VERDICT</text>
+    <text x="140" y="48" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="21" fill="#F2F0EC">deploy · package · compose · extend-core · hard-fork · assemble</text>
+  </g>
+
+  <text x="64" y="548" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+        font-size="21" fill="#6E7276">“From scratch” is not an outcome. The worst case is</text>
+  <text x="552" y="548" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+        font-size="21" fill="#C9A227">assemble</text>
+  <text x="658" y="548" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+        font-size="21" fill="#6E7276">, built from other people’s parts.</text>
+</svg>

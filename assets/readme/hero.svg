@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1200" height="400" viewBox="0 0 1200 400"
+     role="img" aria-labelledby="heroTitle heroDesc">
+  <title id="heroTitle">wheel — a market-first gate for Claude Code</title>
+  <desc id="heroDesc">The plugin searches for existing solutions before any code is written, scores each candidate's maturity from A to D, and returns an adoption mode. The panel on the right shows a real candidate list for a workflow-orchestration request, ending in the verdict "deploy".</desc>
+
+  <rect width="1200" height="400" rx="26" fill="#0B0C0D"/>
+  <rect x="0.75" y="0.75" width="1198.5" height="398.5" rx="25.25" fill="none" stroke="#24282B" stroke-width="1.5"/>
+
+  <g id="title-block" transform="translate(64 0)">
+    <text x="0" y="86" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="19" letter-spacing="2.6" fill="#6E7276">CLAUDE CODE PLUGIN</text>
+
+    <text x="0" y="196" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          font-size="112" font-weight="700" letter-spacing="-3" fill="#F2F0EC">wheel</text>
+
+    <text x="0" y="252" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          font-size="27" fill="#F2F0EC">The wheel already exists.</text>
+    <text x="0" y="290" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          font-size="27" fill="#9AA0A4">Find it, measure the gap, adopt it.</text>
+
+    <g id="elimination-motif" transform="translate(0 336)">
+      <text x="0" y="0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+            font-size="20" fill="#6E7276">8 candidates</text>
+      <text x="160" y="0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+            font-size="20" fill="#3E4448">›</text>
+      <text x="188" y="0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+            font-size="20" fill="#8B9195">3</text>
+      <text x="216" y="0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+            font-size="20" fill="#3E4448">›</text>
+      <text x="244" y="0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+            font-size="20" fill="#C9A227">1</text>
+      <text x="284" y="0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+            font-size="19" fill="#4B5155">every question removes some</text>
+    </g>
+  </g>
+
+  <g id="candidate-panel" transform="translate(660 56)">
+    <rect width="480" height="288" rx="16" fill="#121417" stroke="#24282B" stroke-width="1.5"/>
+
+    <text x="28" y="46" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="18" letter-spacing="1.8" fill="#6E7276">CANDIDATE</text>
+    <text x="452" y="46" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="18" letter-spacing="1.8" fill="#6E7276">MATURITY</text>
+    <line x1="28" y1="64" x2="452" y2="64" stroke="#24282B" stroke-width="1.5"/>
+
+    <text x="28" y="106" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="21" fill="#F2F0EC">kestra-io/kestra</text>
+    <text x="452" y="106" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="21" font-weight="700" fill="#C9A227">A</text>
+
+    <text x="28" y="146" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="21" fill="#9AA0A4">n8n-io/n8n</text>
+    <text x="452" y="146" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="21" fill="#9AA0A4">B</text>
+
+    <text x="28" y="186" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="21" fill="#9AA0A4">your own code</text>
+    <text x="452" y="186" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="21" fill="#6E7276">—</text>
+
+    <line x1="28" y1="214" x2="452" y2="214" stroke="#24282B" stroke-width="1.5"/>
+
+    <text x="28" y="252" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="18" letter-spacing="1.8" fill="#6E7276">VERDICT</text>
+    <text x="28" y="252" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="21" fill="#C9A227" transform="translate(112 0)">deploy</text>
+    <text x="452" y="252" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="19" fill="#6E7276">upstream owns it</text>
+  </g>
+</svg>
