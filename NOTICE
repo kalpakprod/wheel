@@ -1,0 +1,23 @@
+wheel — third-party attributions
+================================
+
+skills/wheel-grilling/SKILL.md and skills/wheel-decision/SKILL.md are adapted
+forks of the `grilling` and `domain-modeling` skills from:
+
+    mattpocock/skills — https://github.com/mattpocock/skills
+    MIT License, Copyright (c) 2026 Matt Pocock
+
+Changes made in this fork:
+
+  wheel-grilling  — repurposed from designing a system to selecting an existing
+                    one; adds the elimination rule (a question is only legal if
+                    its answer removes candidates), derives questions from
+                    candidate differences, inverts interview depth against
+                    candidate count, and drops `disable-model-invocation` so the
+                    pipeline can call it.
+
+  wheel-decision  — reduced to recording an adoption verdict; keeps the original
+                    three-part test for when a decision is worth writing down,
+                    replaces the ADR template with a candidate-comparison record.
+
+The MIT license text of the original is reproduced in LICENSE-mattpocock.

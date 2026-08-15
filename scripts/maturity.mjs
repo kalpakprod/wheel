@@ -18,20 +18,29 @@ const DAY = 864e5;
 
 // ── pure logic (covered by --self-check) ──────────────────────
 
+// A repo of markdown skills/prompts has no releases and nothing to deploy.
+// Judging it by release cadence and Dockerfiles understates it every time.
+export function kindOf(paths) {
+  return paths.some((p) => /^(SKILL\.md|skills|\.claude-plugin|commands)$/i.test(p)) ? "skills" : "service";
+}
+
 export function flags(r, now) {
-  return {
+  const f = {
     alive: now - Date.parse(r.pushed_at) < 90 * DAY,
     adopted: r.stars > 500,
     sustained: r.releases_12mo >= 2,
     safe: Boolean(r.license) && !r.archived,
     bus: r.contributors >= 3,
   };
+  if (r.kind === "skills") delete f.sustained; // not applicable: 4 flags decide
+  return f;
 }
 
 export function level(f, r) {
   if (r.archived) return "D"; // donor: code survives, support does not
+  const total = Object.keys(f).length;
   const n = Object.values(f).filter(Boolean).length;
-  return n === 5 ? "A" : n === 4 ? "B" : n >= 2 ? "C" : "D";
+  return n === total ? "A" : n === total - 1 ? "B" : n >= 2 ? "C" : "D";
 }
 
 // Operational gap: how far the repo is from running where the user needs it.
@@ -67,8 +76,10 @@ function probe(slug, now) {
   const contributors = gh(`repos/${slug}/contributors?per_page=10`) ?? [];
   const root = gh(`repos/${slug}/contents?ref=${repo.default_branch}`) ?? [];
 
+  const names = root.map((x) => x.name);
   const r = {
     slug,
+    kind: kindOf(names),
     stars: repo.stargazers_count,
     pushed_at: repo.pushed_at,
     archived: repo.archived,
@@ -77,7 +88,7 @@ function probe(slug, now) {
     contributors: contributors.length,
   };
   const f = flags(r, now);
-  return { ...r, flags: f, level: level(f, r), ops: opsGap(root.map((x) => x.name)) };
+  return { ...r, flags: f, level: level(f, r), ops: r.kind === "skills" ? { gap: "n/a" } : opsGap(names) };
 }
 
 // ── cache ─────────────────────────────────────────────────────
@@ -122,6 +133,17 @@ async function selfCheck() {
   assert.equal(opsGap(["Dockerfile", "src"]).gap, "small");
   assert.equal(opsGap(["package.json"]).gap, "small");
   assert.equal(opsGap(["README.md", "main.c", "Makefile"]).gap, "large");
+
+  // a skills repo is not punished for having no releases
+  assert.equal(kindOf(["SKILL.md", "references"]), "skills");
+  assert.equal(kindOf(["skills", "README.md"]), "skills");
+  assert.equal(kindOf(["src", "package.json"]), "service");
+  const skillRepo = { pushed_at: fresh, stars: 1600, releases_12mo: 0, license: "MIT", archived: false, contributors: 5, kind: "skills" };
+  assert.equal(Object.keys(flags(skillRepo, now)).length, 4);
+  assert.equal(level(flags(skillRepo, now), skillRepo), "A");
+  // same repo judged as a service would lose a whole grade
+  const asService = { ...skillRepo, kind: "service" };
+  assert.equal(level(flags(asService, now), asService), "B");
 
   console.log("self-check: ok");
 }
