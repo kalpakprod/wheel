@@ -1,0 +1,9 @@
+{
+  "name": "wheel",
+  "version": "0.1.0",
+  "description": "The wheel already exists. Before writing any code, find existing solutions on the market, measure the gap, interview the user with candidate-derived questions, and pick an adoption mode. Building from scratch is not a valid outcome.",
+  "author": {
+    "name": "kalpakprod"
+  },
+  "hooks": "./hooks/hooks.json"
+}

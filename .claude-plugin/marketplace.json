@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "wheel",
+  "description": "The wheel already exists: a market-first gate for Claude Code that finds ready solutions before any line of code is written.",
+  "owner": {
+    "name": "kalpakprod",
+    "url": "https://github.com/kalpakprod"
+  },
+  "plugins": [
+    {
+      "name": "wheel",
+      "description": "Before any build request, the agent searches the market for existing solutions, scores their maturity, measures the functional/operational/architectural gap, grills the user with questions derived from candidate differences, and returns an adoption mode instead of new code. Includes /wheel.",
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
+}

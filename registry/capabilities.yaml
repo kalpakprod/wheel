@@ -1,0 +1,93 @@
+# wheel: intent -> what to switch on now, and where to look on the market.
+#
+# Deterministic layer. The skill greps `triggers` against the user's request,
+# takes `skills` (switch on immediately) and `search_terms` / `topics`
+# (feed into S3 market search). Nothing here is a recommendation of a product —
+# maturity and gaps are measured per candidate at runtime.
+#
+# Adding an entry: only when an existing one does not cover the intent.
+# Keep `skills` to what actually exists and is installable.
+
+- id: workflow-orchestration
+  triggers: [оркестрация, workflow, пайплайн, pipeline, etl, cron, планировщик, автоматизация процессов]
+  skills: []
+  search_terms: [workflow orchestration, workflow engine, data pipeline, job scheduler]
+  topics: [workflow, orchestration, etl, scheduler]
+
+- id: web-frontend
+  triggers: [фронтенд, frontend, лендинг, landing, ui, интерфейс, сайт, дизайн страницы]
+  skills: [frontend-design, react-best-practices, composition-patterns]
+  search_terms: [ui kit, component library, admin template, landing template]
+  topics: [react, ui-components, design-system]
+
+- id: admin-panel
+  triggers: [админка, admin panel, crud, бэкофис, backoffice, internal tool]
+  skills: []
+  search_terms: [admin panel, internal tool builder, crud generator, low-code admin]
+  topics: [admin-dashboard, low-code, crud]
+
+- id: backend-api
+  triggers: [api, бэкенд, backend, rest, graphql, микросервис, сервер]
+  skills: [api-security]
+  search_terms: [api framework, backend framework, graphql server, api gateway]
+  topics: [api, backend, rest-api, graphql]
+
+- id: database
+  triggers: [база данных, бд, database, postgres, миграции, orm, хранилище]
+  skills: [database-security]
+  search_terms: [database, orm, migration tool, embedded database]
+  topics: [database, orm, sql]
+
+- id: auth
+  triggers: [авторизация, аутентификация, auth, sso, oauth, login, пользователи, роли]
+  skills: [identity-federation]
+  search_terms: [authentication server, identity provider, sso, rbac library]
+  topics: [authentication, oauth, sso, identity]
+
+- id: scraping
+  triggers: [парсинг, скрапинг, scraping, краулер, crawler, сбор данных]
+  skills: [crawl4ai-seo, scrapedo-web-scraper, browser-automation]
+  search_terms: [web scraper, crawler framework, headless browser automation]
+  topics: [scraping, crawler, web-automation]
+
+- id: llm-agents
+  triggers: [агент, llm, rag, промпт, векторная база, embedding, чат-бот]
+  skills: [claude-api, mcp-builder]
+  search_terms: [agent framework, rag framework, vector database, llm gateway]
+  topics: [llm, agents, rag, vector-database]
+
+- id: monitoring
+  triggers: [мониторинг, метрики, логи, observability, алерты, дашборд статуса]
+  skills: []
+  search_terms: [monitoring stack, log aggregation, metrics dashboard, uptime monitor]
+  topics: [monitoring, observability, logging, metrics]
+
+- id: ci-cd
+  triggers: [ci, cd, деплой, deploy, пайплайн сборки, релиз, kubernetes, docker]
+  skills: [cloud-k8s]
+  search_terms: [ci cd platform, deployment tool, gitops, paas self-hosted]
+  topics: [ci-cd, devops, gitops, kubernetes]
+
+- id: dataviz
+  triggers: [график, чарт, визуализация, dashboard, дашборд, отчёт с графиками]
+  skills: [dataviz]
+  search_terms: [charting library, bi tool, dashboard builder]
+  topics: [data-visualization, charts, business-intelligence]
+
+- id: docs
+  triggers: [документация, docs, вики, wiki, база знаний, портал знаний]
+  skills: [docs-generator]
+  search_terms: [documentation site generator, wiki, knowledge base]
+  topics: [documentation, static-site-generator, wiki]
+
+- id: file-processing
+  triggers: [pdf, docx, xlsx, конвертация файлов, обработка документов, ocr]
+  skills: [pdf, docx, xlsx, officecli]
+  search_terms: [document conversion, pdf toolkit, ocr engine]
+  topics: [pdf, ocr, document-processing]
+
+- id: messaging
+  triggers: [очередь, queue, брокер, kafka, rabbitmq, события, event-driven]
+  skills: []
+  search_terms: [message broker, event streaming, task queue]
+  topics: [message-queue, event-streaming, pubsub]
