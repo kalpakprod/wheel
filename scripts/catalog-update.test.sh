@@ -11,7 +11,15 @@ BAD=/tmp/wheel-test-bad
 HOME_DIR=/tmp/wheel-test-home
 fail=0
 
-[ -f "$DIST/manifest.json" ] || { echo "нет сборки в $DIST, сначала: curator.py export"; exit 1; }
+if [ ! -f "$DIST/manifest.json" ]; then
+    # на чужой машине и в CI сборки куратора нет: берём опубликованный релиз
+    DIST=/tmp/wheel-test-dist
+    mkdir -p "$DIST"
+    base=https://github.com/kalpakprod/wheel-catalog/releases/latest/download
+    curl -fsSL --max-time 60 -o "$DIST/manifest.json" "$base/manifest.json" &&
+        curl -fsSL --max-time 180 -o "$DIST/catalog.jsonl.gz" "$base/catalog.jsonl.gz" ||
+        { echo "нет сборки и релиз не скачался"; exit 1; }
+fi
 
 rm -rf "$GOOD" "$BAD" "$HOME_DIR"
 mkdir -p "$GOOD" "$BAD" "$HOME_DIR"

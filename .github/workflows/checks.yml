@@ -1,0 +1,37 @@
+# Плагин ходит в сеть и работает на чужих машинах, поэтому обе проверки гоняются
+# и на Linux, и на macOS: там другой бинарь хеша (shasum вместо sha256sum) и другой stat.
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  checks:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: зрелость, только логика без сети
+        run: node scripts/maturity.mjs --self-check
+
+      - name: клиент обновления каталога
+        run: |
+          chmod +x scripts/catalog-update.sh scripts/catalog-update.test.sh
+          scripts/catalog-update.test.sh
+
+      - name: синтаксис shell
+        run: |
+          for f in hooks/session-start.sh scripts/catalog-update.sh scripts/catalog-update.test.sh; do
+            sh -n "$f" || bash -n "$f"
+          done
