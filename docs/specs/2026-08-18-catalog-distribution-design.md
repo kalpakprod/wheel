@@ -55,7 +55,10 @@
 1. `github.com/kalpakprod/wheel-catalog/releases/latest/download/` — стабильный URL, CDN GitHub.
 2. npm-пакет `@kalpakprod/wheel-catalog` — публикация даёт unpkg и jsDelivr бесплатно.
    Плагин ничего не устанавливает через npm, ходит на их CDN по HTTP.
-3. `wheel.kalpak.dev` через уже поднятый Cloudflare Tunnel.
+3. `kukuruza.kalpak.dev/wheel` через уже поднятый Cloudflare Tunnel. Отдельный поддомен
+   потребовал бы записи в DNS, а доступа к API Cloudflare у сборки нет; путь на существующем
+   хосте даёт то же независимое зеркало без новой записи. Файлы лежат в `/srv/wheel`, вне
+   корня сайта: деплой сайта очищает `/srv/site` целиком.
 
 Целостность проверяется по `sha256` из манифеста, поэтому зеркало может быть любым.
 jsDelivr раздаёт файлы по git-тегу, ассеты релизов — нет; проверить перед публикацией,
