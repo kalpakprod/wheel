@@ -105,6 +105,29 @@ Results are cached in `registry/maturity.json` for seven days. Requires the `gh`
 
 Verdicts worth keeping are written to `~/.claude/wheel/decisions/`, and only when all three conditions hold: the decision is hard to reverse, surprising without context, and the result of a real trade-off. Adopting Kestra over your own orchestrator qualifies. Installing a formatter does not.
 
+## The project catalog
+
+`S3` starts its search in a catalog of projects that people actually talk about, so the first
+candidates arrive already parsed: maturity computed, stack and deployment noted, and the search
+terms of the niche recorded in both English and Russian.
+
+The catalog ships apart from the plugin, from the releases of
+[wheel-catalog](https://github.com/kalpakprod/wheel-catalog), because it is rebuilt daily and
+committing it here would make every install download that history. A background check runs at most
+once a day from the same `SessionStart` hook, walks the mirrors listed in the manifest, verifies the
+archive against its `sha256`, and swaps the file atomically. No network, no catalog, no problem:
+the step is skipped in silence.
+
+```bash
+WHEEL_NO_UPDATE=1              # or {"autoupdate": false} in ~/.claude/wheel/config.json
+scripts/catalog-update.sh      # fetch it right now
+scripts/catalog-update.test.sh # five cases against two fake mirrors
+```
+
+Judgements of the kind "should I install this" are deliberately absent from the shared catalog:
+they depend on what already sits in your stack. If you build your own catalog, put it in
+`~/.claude/wheel/catalog.local.jsonl` and it will be read first.
+
 ## What it refuses to do
 
 A plugin built against unnecessary code turns into a rewrite generator unless it is held back, because replacing your project always looks profitable: the gain from a mature product is large and visible, and the cost of migration is invisible until measured.
@@ -141,6 +164,7 @@ skills/wheel-decision/        the verdict record
 commands/wheel.md             /wheel
 registry/capabilities.yaml    intent tags, skills, search terms
 scripts/maturity.mjs          five maturity flags and the operational gap
+scripts/catalog-update.sh     background catalog refresh, mirrors and sha256
 ```
 
 ## License
