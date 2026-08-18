@@ -1,5 +1,14 @@
 #!/bin/bash
 # wheel: inject the market-first gate into session context
+
+# The project catalog the skill greps at S3 is refreshed daily, so it ships apart from
+# the plugin. Check at most once a day and update in the background: the session must not
+# wait on the network, and a missing catalog is not an error.
+WHEEL_DIR="${WHEEL_HOME:-$HOME/.claude/wheel}"
+if [ -z "$(find "$WHEEL_DIR/catalog.meta.json" -mtime -1 2> /dev/null)" ]; then
+    ("${CLAUDE_PLUGIN_ROOT:-$(dirname "$0")/..}/scripts/catalog-update.sh" > /dev/null 2>&1 &) 2> /dev/null
+fi
+
 cat <<'EOF'
 <wheel-rule>
 Before implementing ANY user request that creates or changes functionality — a new project, a feature in an existing one, an integration, an automation, a UI, a script — you MUST run the `wheel` skill FIRST, before writing code or a plan.
