@@ -31,8 +31,16 @@ head -c 10000 "$DIST/catalog.jsonl.gz" > "$BAD/catalog.jsonl.gz"
 
 (cd "$GOOD" && python3 -m http.server 8899 --bind 127.0.0.1 > /dev/null 2>&1 &)
 (cd "$BAD" && python3 -m http.server 8898 --bind 127.0.0.1 > /dev/null 2>&1 &)
-sleep 2
 trap 'pkill -f "http.server 889" > /dev/null 2>&1 || true' EXIT
+
+# ждём готовности, а не спим наугад: на медленном раннере питон стартует дольше двух секунд,
+# и клиент с таймаутом в пять секунд успевает сходить в пустоту
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+    curl -fsS --max-time 2 -o /dev/null "http://127.0.0.1:8899/manifest.json" 2> /dev/null && break
+    sleep 1
+done
+curl -fsS --max-time 2 -o /dev/null "http://127.0.0.1:8899/manifest.json" 2> /dev/null ||
+    { echo "локальное зеркало не поднялось"; exit 1; }
 
 check() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "ПАДЕНИЕ $1: ждали [$3], получили [$2]"; fail=1; fi; }
 
