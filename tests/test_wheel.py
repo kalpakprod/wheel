@@ -347,7 +347,7 @@ class RunStoreTests(unittest.TestCase):
 
     def test_containment_rejects_resolved_escape_before_creating_parent(self) -> None:
         root = Path(self.tempdir.name) / "project"
-        candidate = root / ".wheel" / "decisions" / "record.md"
+        candidate = root.resolve() / ".wheel" / "decisions" / "record.md"
         outside = Path(self.tempdir.name) / "outside" / "record.md"
         original_resolve = Path.resolve
 
@@ -971,7 +971,7 @@ class DecisionTests(unittest.TestCase):
     def test_project_scope_is_contained_in_project_wheel_directory(self) -> None:
         project_root = Path(self.tempdir.name) / "project"
         path = record_decision(self.decision, "project", project_root=project_root, home=self.home)
-        self.assertTrue(path.is_relative_to(project_root / ".wheel" / "decisions"))
+        self.assertTrue(path.is_relative_to(project_root.resolve() / ".wheel" / "decisions"))
 
     def test_unaccepted_recommendation_cannot_be_recorded(self) -> None:
         with self.assertRaisesRegex(ValueError, "accepted"):
