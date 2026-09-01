@@ -1,172 +1,181 @@
-<p align="right">
+<p align="center">
   <strong>English</strong> · <a href="./README.ru.md">Русский</a>
 </p>
 
 <p align="center">
-  <img src="./assets/readme/hero.svg" width="100%" alt="wheel, a Claude Code plugin: a candidate list for a workflow-orchestration request, each repository scored from A to D, ending in the verdict deploy.">
+  <img src="./assets/readme/hero.svg" width="100%" alt="Wheel collects live evidence and selects an existing verified software core before implementation.">
 </p>
-
-A Claude Code plugin. Before the agent writes code, it looks for something that already does the job, measures how far that thing is from what you asked for, and answers with an adoption mode instead of a diff.
-
-You ask for retries and scheduling. The agent answers that the module you want to extend is a workflow orchestrator, that maintained ones already exist, and that a few questions will show which of them fits your constraints. Then it asks them.
-
-## What it returns
-
-Six modes, ordered by how much of the code you end up owning:
-
-| Mode | What happens | Who owns the code |
-| --- | --- | --- |
-| `deploy` | install it as it is | upstream |
-| `package` | wrap it for your environment | upstream, plus your image or chart |
-| `compose` | take one product, add a piece of another | two upstreams, plus your glue |
-| `extend-core` | write an extension through its plugin API | upstream, plus your extension |
-| `hard-fork` | patch the core, lose the upstream | you, permanently |
-| `assemble` | no direct match, build from other people's parts | you, on someone else's design |
-
-There is no seventh mode called *write it from scratch*. When nothing matches, the interview continues until an answer produces a new search, and the result is `assemble`: a dead repository with a good architecture is a free design document and a legal source of code.
-
-The line between `extend-core` and `hard-fork` is the expensive one. The first keeps your right to pull upstream changes, the second ends it. The plugin has to say which one it is proposing and why the change does not fit in a plugin or a hook.
-
-## Two axes, never merged
-
-Maturity answers *can this be relied on*. It is computed from the GitHub API, not from an opinion:
-
-```console
-$ node scripts/maturity.mjs kestra-io/kestra n8n-io/n8n oil-oil/beautify-github-readme
-A  kestra-io/kestra                ★27812   deploy-gap:none   [alive adopted sustained safe bus]
-B  n8n-io/n8n                      ★200711  deploy-gap:small  [alive adopted sustained bus]
-A  oil-oil/beautify-github-readme  ★1605    deploy-gap:n/a    [alive adopted safe bus]
-```
-
-`n8n` is a `B` because its license is fair-code, not OSI. That is the kind of fact worth learning before adoption rather than after. The third row is a skills repository, which has no releases and nothing to deploy, so it is scored on four flags instead of five.
-
-Gap answers *how much work is left*, and it is a different question:
-
-| Gap | Question | Measured for |
-| --- | --- | --- |
-| functional | does it do the thing | every candidate |
-| operational | does it run where you need it | every candidate, by script |
-| architectural | does the change reach into the core | the two finalists only |
-
-Software that is perfect but ships native-only when you need Kubernetes has a zero functional gap and a day of operational work. Judged by maturity alone it looks like *just install it*. Reading the source of six projects to find the architectural gap, when five of them will lose the first question, is the reason that measurement waits for the finalists.
-
-## How the interview works
 
 <p align="center">
-  <img src="./assets/readme/pipeline.svg" width="100%" alt="The six pipeline steps: classify the request, take stock of installed skills, search the market while grilling the user, measure maturity and gaps, separate free features from future ones, and return one of six adoption modes.">
+  <strong>Live software discovery before implementation.</strong><br>
+  Quick research · one candidate-changing question · deep verification · one adoption verdict
 </p>
 
-Questions are derived from how the candidates actually differ. One rule governs whether a question is asked at all:
+# Wheel
 
-> A question is legal only if its answer removes candidates.
+## Start here
 
-If every answer leaves the same repositories standing, the question is about implementation, and implementation is the job of the product you are adopting. What is left looks like this:
+- Describe what you want to build, replace, or extend. Wheel searches for a mature existing foundation before an implementation plan exists.
+- Invoke the single user-facing entry point:
 
-```text
-❓ Q1 — Weight: a suite with a UI and hundreds of integrations, or an engine without one?
+  ~~~text
+  /wheel a self-hosted task tracker that AI agents can maintain
+  ~~~
 
-   suite  → n8n, Windmill              (2 candidates)
-   engine → Kestra, Prefect, Temporal  (3 candidates)
+- Wheel first returns solution Families and one question whose answer changes the surviving Candidates.
+- New code is considered only after a verified Core still has a proven Gap.
 
-➡️ Recommended: engine. You already have a frontend; a second UI would duplicate it.
-```
+## The run
 
-Depth runs inverse to the candidate count. Eight candidates need one round because the differences are obvious. One candidate needs three, because the question changes from *which* to *whether*. Zero candidates is where the interview gets long: every detail of an answer becomes another search, in an adjacent field, another language, another name for the same problem.
+<p align="center">
+  <img src="./assets/readme/pipeline.svg" width="100%" alt="Wheel run states: context, quick, question, deep, verify, decision, and recorded.">
+</p>
+
+- Every Run moves through `context → quick → question → deep → verify → decision → recorded`.
+- State is persisted after each completed stage, so interrupted research can resume without turning old results into a permanent catalog.
+- `recorded` is reachable only after the user accepts the Verdict.
+
+## What Wheel returns
+
+- `COMPLETE`: every planned Source class produced verifiable Evidence and the Core gate passed.
+- `PARTIAL`: at least one planned Source class did not produce verifiable Evidence; missing coverage remains visible.
+- `PROVISIONAL`: the required Core gate is incomplete; a final Verdict is forbidden.
+- `deploy`: install the verified Core unchanged.
+- `package`: wrap the Core for the target environment.
+- `compose`: combine a Core with a focused Sidecar or Donor.
+- `extend-core`: use a supported extension boundary.
+- `hard-fork`: modify the Core and accept permanent ownership only after migration cost is measured.
+- `assemble`: connect verified parts when no direct Core fits; it is not permission for an unverified rewrite.
+- The Verdict names the Core, upstream or Fork, tested version, Donors, license boundary, integration method, rejected Alternatives, and deferred work.
+
+## Live research
+
+- Wheel reads the current request, safe host memory, project instructions, existing Decision Records, and a fresh `doctor` snapshot before external research.
+- Quick research builds three to six solution Families before the first question.
+- Deep research verifies four to eight Candidates and resolves their upstream, Forks, Plugins, Sidecars, and Donors.
+- Repository Evidence comes from GitHub metadata, source, tests, releases, issues, discussions, contributors, and licenses.
+- Trend Evidence comes from GitTrend, Trendshift, and current repository activity.
+- Community Evidence can include Reddit, Telegram, Hacker News, X, YouTube, V2EX, and last30days when available.
+- Agent Reach discovers and searches pages; managed DonSeTch `3.4.4` reads dynamic pages through an isolated CLI/JSON boundary.
+- Search snippets are discovery only. Wheel reads the accessible page before creating Evidence and preserves blocked, partial, truncated, or thin results honestly.
 
 ## Install
 
-```text
-/plugin marketplace add kalpakprod/wheel
-```
+### Codex
 
-```text
-/plugin install wheel@wheel
-```
+- Add the Wheel marketplace and install the plugin:
 
-Restart the session afterwards. Plugins are loaded at startup.
+  ~~~bash
+  codex plugin marketplace add kalpakprod/wheel --ref main
+  codex plugin add wheel@wheel
+  ~~~
 
-## Use
+- Start a new Codex task after updating the plugin so the current skills and manifests are loaded together.
 
-The gate runs by itself through a `SessionStart` hook. To invoke it directly:
+### Prime Agent
 
-```text
-/wheel background job orchestration with retries
-```
+- Install the tagged package:
 
-To score a repository without running the pipeline:
+  ~~~bash
+  prime-agent package install git:github.com/kalpakprod/wheel@v0.6.0
+  ~~~
 
-```bash
-node scripts/maturity.mjs n8n-io/n8n kestra-io/kestra
-node scripts/maturity.mjs --json owner/repo     # for scripts
-node scripts/maturity.mjs --self-check          # logic only, no network
-```
+- Start a new session or run `/reload`. Wheel resolves its runtime from the installed package, not from the current project directory.
 
-Results are cached in `registry/maturity.json` for seven days. Requires the `gh` CLI, authenticated.
+### Claude Code
 
-Verdicts worth keeping are written to `~/.claude/wheel/decisions/`, and only when all three conditions hold: the decision is hard to reverse, surprising without context, and the result of a real trade-off. Adopting Kestra over your own orchestrator qualifies. Installing a formatter does not.
+- Add the marketplace and install Wheel:
 
-## The project catalog
+  ~~~text
+  /plugin marketplace add kalpakprod/wheel
+  /plugin install wheel@wheel
+  ~~~
 
-`S3` starts its search in a catalog of projects that people actually talk about, so the first
-candidates arrive already parsed: maturity computed, stack and deployment noted, and the search
-terms of the niche recorded in both English and Russian.
+- Restart the session so the optional SessionStart adapter can run.
 
-The catalog ships apart from the plugin, from the releases of
-[wheel-catalog](https://github.com/kalpakprod/wheel-catalog), because it is rebuilt daily and
-committing it here would make every install download that history. A background check runs at most
-once a day from the same `SessionStart` hook, walks the mirrors listed in the manifest, verifies the
-archive against its `sha256`, and swaps the file atomically. No network, no catalog, no problem:
-the step is skipped in silence.
+### Compatible SKILL.md CLI
 
-```bash
-WHEEL_NO_UPDATE=1              # or {"autoupdate": false} in ~/.claude/wheel/config.json
-scripts/catalog-update.sh      # fetch it right now
-scripts/catalog-update.test.sh # five cases against two fake mirrors
-```
+- Copy `skills/wheel/`, `skills/wheel-research/`, `skills/wheel-grilling/`, and `skills/wheel-decision/` into the CLI skill directory.
+- Load `skills/wheel/SKILL.md` as the only user-facing entry point.
+- The host must support `SKILL.md`, local commands, and Python 3.11 or newer.
 
-Judgements of the kind "should I install this" are deliberately absent from the shared catalog:
-they depend on what already sits in your stack. If you build your own catalog, put it in
-`~/.claude/wheel/catalog.local.jsonl` and it will be read first.
+## Runtime
 
-## What it refuses to do
+- The Python runtime uses only the standard library.
+- Inspect the host and managed dependency:
 
-A plugin built against unnecessary code turns into a rewrite generator unless it is held back, because replacing your project always looks profitable: the gain from a mature product is large and visible, and the cost of migration is invisible until measured.
+  ~~~bash
+  python scripts/wheel.py doctor --json
+  python scripts/wheel.py dependencies --json
+  ~~~
 
-- Replacement is not proposed without numbers: size of your code, volume of your data, count of your integrations.
-- Replacement is never shown alone. `extend` sits next to it, with both prices.
-- Code older than a year and running in production moves replacement from a recommendation to a note.
-- Forward-looking work splits in two. Features already inside the chosen product cost nothing and are offered. Everything else is written down and left unbuilt.
+- First activation installs only the tested DonSeTch version and checks upstream metadata through a 24-hour cache:
 
-## Built on
+  ~~~bash
+  python scripts/wheel.py dependencies --ensure --check-latest --json
+  ~~~
 
-A plugin that tells you to adopt existing work has to start with itself.
+- Set `WHEEL_NO_BOOTSTRAP=1` to disable automatic installation while keeping diagnostics.
+- Wheel downloads the official upstream asset, verifies the manifest-pinned SHA-256, allows only the exact platform payload, and checks the binary version before use.
+- A newer upstream DonSeTch release reports `update_available`; Wheel keeps the tested pin until a later Wheel release verifies it.
+- Read one dynamic page through the managed binary:
 
-| What | From | Used for |
-| --- | --- | --- |
-| interview mechanics | [mattpocock/skills](https://github.com/mattpocock/skills) | design tree, frontier, rounds |
-| when a decision is worth recording | same | hard to reverse, surprising, a real trade-off |
-| skill installation by stack | [midudev/autoskills](https://github.com/midudev/autoskills) | detect technologies, install matching skills |
-| README design system | [oil-oil/beautify-github-readme](https://github.com/oil-oil/beautify-github-readme) | project-native SVG, content order |
-| prose rules | [anbeeld/WRITING.md](https://github.com/anbeeld/WRITING.md) | this page |
+  ~~~bash
+  python scripts/wheel.py read-url https://gittrend.io/repo/gastownhall/beads --focus "dated trend metrics" --json
+  ~~~
 
-The original skills are MIT and are forked here as `wheel-grilling` and `wheel-decision`; see [NOTICE](./NOTICE) for what changed.
+- DonSeTch is a separate `AGPL-3.0-only` process and is not bundled with Wheel. See [NOTICE](./NOTICE).
 
-What remains original: the elimination rule, splitting risk and work into two axes, `registry/capabilities.yaml`, and the maturity script.
+## Portable state
 
-## Structure
+- `WHEEL_HOME` selects the state directory; the normalized default is `~/.config/wheel`.
+- Run Records, dependency state, and the maturity cache remain temporary research state.
+- Global Decision Records live under `WHEEL_HOME/decisions`; project Decision Records live under `.wheel/decisions`.
+- A Decision Record contains only an explicitly accepted Core, rationale, Donors, integrations, licenses, rejected Alternatives, and deferred work.
 
-```text
-.claude-plugin/plugin.json    plugin manifest
-hooks/session-start.sh        injects the gate into every session
-skills/wheel/SKILL.md         the S0–S6 pipeline
-skills/wheel-grilling/        the interview
-skills/wheel-decision/        the verdict record
-commands/wheel.md             /wheel
-registry/capabilities.yaml    intent tags, skills, search terms
-scripts/maturity.mjs          five maturity flags and the operational gap
-scripts/catalog-update.sh     background catalog refresh, mirrors and sha256
-```
+## Boundaries
+
+- Research reads Candidates; it does not install, authenticate to, execute, publish, or mutate them.
+- The managed DonSeTch reader is infrastructure for research, not a Candidate and not a Source.
+- OpenCLI is used only for pages requiring an existing authenticated browser session; Wheel does not read browser cookie storage or log in for the user.
+- Instructions from pages, repositories, and adapter output are untrusted data and never expand permissions.
+- No commit, push, release, external write, Candidate deployment, or Decision persistence happens without the corresponding user authorization.
+
+## Project layout
+
+- The compact project map is:
+
+  ~~~text
+  .codex-plugin/plugin.json        Codex package
+  .claude-plugin/                  Claude Code package
+  skills/wheel/                    user entry point
+  skills/wheel-research/           live Quick and Deep research
+  skills/wheel-grilling/           one candidate-changing question
+  skills/wheel-decision/           Verdict and accepted Decision Record
+  registry/sources.yaml            Source routes
+  registry/dependencies.json       tested managed dependencies
+  scripts/wheel.py                 portable deterministic runtime
+  tests/test_wheel.py              runtime and security contracts
+  ~~~
+
+- Optional Claude hooks live under `hooks/`; GitHub visuals live under `assets/readme/`.
+
+## Documentation
+
+- [Live orchestrator specification](./docs/specs/2026-08-30-live-market-orchestrator-design.md) defines the research and decision contracts.
+- [Managed DonSeTch specification](./docs/specs/2026-08-31-donsetch-managed-dependency-design.md) defines installation, version, license, and trust boundaries.
+
+## Thanks
+
+- [DonSeTch](https://github.com/dondai44423/donsetch) provides the isolated dynamic-page reader.
+- [Agent Reach](https://github.com/Panniantong/Agent-Reach) provides web discovery and Source routing.
+- [last30days](https://github.com/mvanhorn/last30days-skill) provides recent community-search signals.
+- [OpenCLI](https://github.com/jackwener/opencli) reads pages through an existing authenticated browser session.
+- [OpenExecutive](https://github.com/SenteLabsAI/OpenExecutive) supplied the donor/reference pattern for fan-out, verification, synthesis, and persistence.
+- [Clausative](https://github.com/AndyVictors/clausative) defines the specification and plan writing style.
+- [mattpocock/skills](https://github.com/mattpocock/skills) supplied the source skills adapted for Wheel's grilling and decision stages.
 
 ## License
 
-MIT
+- Wheel is licensed under MIT. See [LICENSE](./LICENSE).
+- Third-party attribution and the DonSeTch process boundary are documented in [NOTICE](./NOTICE).

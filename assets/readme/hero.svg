@@ -1,71 +1,60 @@
-<svg xmlns="http://www.w3.org/2000/svg"
-     width="1200" height="400" viewBox="0 0 1200 400"
-     role="img" aria-labelledby="heroTitle heroDesc">
-  <title id="heroTitle">wheel — a market-first gate for Claude Code</title>
-  <desc id="heroDesc">The plugin searches for existing solutions before any code is written, scores each candidate's maturity from A to D, and returns an adoption mode. The panel on the right shows a real candidate list for a workflow-orchestration request, ending in the verdict "deploy".</desc>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="wheel-hero-title wheel-hero-desc">
+  <title id="wheel-hero-title">Wheel, live software discovery before implementation</title>
+  <desc id="wheel-hero-desc">Wheel collects evidence from repositories, trends, communities, and documentation to choose an existing software core before new code is written.</desc>
+  <defs>
+    <marker id="wheel-hero-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/>
+    </marker>
+  </defs>
 
-  <rect width="1200" height="400" rx="26" fill="#0B0C0D"/>
-  <rect x="0.75" y="0.75" width="1198.5" height="398.5" rx="25.25" fill="none" stroke="#24282B" stroke-width="1.5"/>
+  <rect width="1200" height="360" rx="24" fill="#f5f5f5"/>
+  <line x1="56" y1="304" x2="1144" y2="304" stroke="rgba(45,49,66,0.12)" stroke-width="1"/>
 
-  <g id="title-block" transform="translate(64 0)">
-    <text x="0" y="86" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-          font-size="19" letter-spacing="2.6" fill="#6E7276">CLAUDE CODE PLUGIN</text>
+  <rect x="56" y="52" width="8" height="40" rx="4" fill="#eb6c36"/>
+  <text x="88" y="64" fill="#4f5d75" font-size="16" font-weight="600" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="2">LIVE MARKET-FIRST SOFTWARE DISCOVERY</text>
+  <text x="56" y="148" fill="#2d3142" font-size="72" font-weight="600" font-family="'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">Wheel</text>
+  <text x="56" y="196" fill="#2d3142" font-size="28" font-family="'Instrument Serif', Georgia, 'Times New Roman', serif">Reuse before build.</text>
+  <text x="56" y="236" fill="#4f5d75" font-size="20" font-family="'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">Find a core. Verify the gap. Build less.</text>
 
-    <text x="0" y="196" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
-          font-size="112" font-weight="700" letter-spacing="-3" fill="#F2F0EC">wheel</text>
-
-    <text x="0" y="252" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
-          font-size="27" fill="#F2F0EC">The wheel already exists.</text>
-    <text x="0" y="290" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
-          font-size="27" fill="#9AA0A4">Find it, measure the gap, adopt it.</text>
-
-    <g id="elimination-motif" transform="translate(0 336)">
-      <text x="0" y="0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-            font-size="20" fill="#6E7276">8 candidates</text>
-      <text x="160" y="0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-            font-size="20" fill="#3E4448">›</text>
-      <text x="188" y="0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-            font-size="20" fill="#8B9195">3</text>
-      <text x="216" y="0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-            font-size="20" fill="#3E4448">›</text>
-      <text x="244" y="0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-            font-size="20" fill="#C9A227">1</text>
-      <text x="284" y="0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-            font-size="19" fill="#4B5155">every question removes some</text>
-    </g>
+  <g font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" font-weight="600">
+    <rect x="56" y="264" width="100" height="28" rx="4" fill="#ececec" stroke="rgba(45,49,66,0.18)"/>
+    <text x="106" y="284" fill="#4f5d75" text-anchor="middle">QUICK</text>
+    <rect x="168" y="264" width="100" height="28" rx="4" fill="#ececec" stroke="rgba(45,49,66,0.18)"/>
+    <text x="218" y="284" fill="#4f5d75" text-anchor="middle">DEEP</text>
+    <rect x="280" y="264" width="100" height="28" rx="4" fill="rgba(235,108,54,0.08)" stroke="#eb6c36"/>
+    <text x="330" y="284" fill="#eb6c36" text-anchor="middle">VERIFY</text>
+    <rect x="392" y="264" width="100" height="28" rx="4" fill="#ececec" stroke="rgba(45,49,66,0.18)"/>
+    <text x="442" y="284" fill="#4f5d75" text-anchor="middle">DECIDE</text>
   </g>
 
-  <g id="candidate-panel" transform="translate(660 56)">
-    <rect width="480" height="288" rx="16" fill="#121417" stroke="#24282B" stroke-width="1.5"/>
-
-    <text x="28" y="46" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-          font-size="18" letter-spacing="1.8" fill="#6E7276">CANDIDATE</text>
-    <text x="452" y="46" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-          font-size="18" letter-spacing="1.8" fill="#6E7276">MATURITY</text>
-    <line x1="28" y1="64" x2="452" y2="64" stroke="#24282B" stroke-width="1.5"/>
-
-    <text x="28" y="106" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-          font-size="21" fill="#F2F0EC">kestra-io/kestra</text>
-    <text x="452" y="106" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-          font-size="21" font-weight="700" fill="#C9A227">A</text>
-
-    <text x="28" y="146" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-          font-size="21" fill="#9AA0A4">n8n-io/n8n</text>
-    <text x="452" y="146" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-          font-size="21" fill="#9AA0A4">B</text>
-
-    <text x="28" y="186" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-          font-size="21" fill="#9AA0A4">your own code</text>
-    <text x="452" y="186" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-          font-size="21" fill="#6E7276">—</text>
-
-    <line x1="28" y1="214" x2="452" y2="214" stroke="#24282B" stroke-width="1.5"/>
-
-    <text x="28" y="252" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-          font-size="18" letter-spacing="1.8" fill="#6E7276">VERDICT</text>
-    <text x="28" y="252" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-          font-size="21" fill="#C9A227" transform="translate(112 0)">deploy</text>
-    <text x="452" y="252" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-          font-size="19" fill="#6E7276">upstream owns it</text>
+  <!-- Evidence lines are drawn before nodes. -->
+  <g fill="none" stroke="#4f5d75" stroke-width="1.2">
+    <path d="M 780 88 H 900 V 164 H 920"/>
+    <path d="M 780 144 H 876 V 176 H 920"/>
+    <path d="M 780 200 H 876 V 188 H 920"/>
+    <path d="M 780 256 H 900 V 200 H 920"/>
   </g>
+  <path d="M 1040 182 V 252" fill="none" stroke="#eb6c36" stroke-width="1.6" marker-end="url(#wheel-hero-arrow)"/>
+
+  <g font-family="'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <rect x="620" y="64" width="160" height="48" rx="6" fill="#ffffff" stroke="#4f5d75"/>
+    <text x="700" y="94" fill="#2d3142" font-size="18" font-weight="600" text-anchor="middle">Repositories</text>
+    <rect x="620" y="120" width="160" height="48" rx="6" fill="#ffffff" stroke="#4f5d75"/>
+    <text x="700" y="150" fill="#2d3142" font-size="18" font-weight="600" text-anchor="middle">Trends</text>
+    <rect x="620" y="176" width="160" height="48" rx="6" fill="#ffffff" stroke="#4f5d75"/>
+    <text x="700" y="206" fill="#2d3142" font-size="18" font-weight="600" text-anchor="middle">Communities</text>
+    <rect x="620" y="232" width="160" height="48" rx="6" fill="#ffffff" stroke="#4f5d75"/>
+    <text x="700" y="262" fill="#2d3142" font-size="18" font-weight="600" text-anchor="middle">Documentation</text>
+  </g>
+
+  <circle cx="980" cy="182" r="60" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="2"/>
+  <text x="980" y="174" fill="#4f5d75" font-size="12" font-weight="600" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="2">VERIFIED</text>
+  <text x="980" y="204" fill="#2d3142" font-size="26" font-weight="600" font-family="'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" text-anchor="middle">CORE</text>
+
+  <rect x="908" y="264" width="144" height="40" rx="6" fill="#2d3142"/>
+  <text x="980" y="290" fill="#f5f5f5" font-size="16" font-weight="600" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="1">ADOPT</text>
+
+  <text x="56" y="332" fill="#7a8399" font-size="12" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="1">PYTHON 3.11+ · CODEX · CLAUDE CODE · GENERIC SKILL.MD CLI</text>
+  <text x="1144" y="332" fill="#7a8399" font-size="12" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end" letter-spacing="1">WHEEL 0.6.0</text>
 </svg>

@@ -1,64 +1,58 @@
 ---
 name: wheel-decision
-description: Record the outcome of a wheel run — which existing solution was picked, in which adoption mode, and why the alternatives lost. Use at S6, and whenever a decision about adopting, forking or replacing a tool has to be written down. Also defines when a decision is NOT worth recording.
+description: Internal Wheel verdict and decision-record stage. Use after deep verification to produce a Clausative Verdict, and persist an accepted decision only when wheel confirms explicit user acceptance.
 ---
 
-# wheel-decision: запись вердикта
+# wheel-decision
 
-Форк `domain-modeling` из [mattpocock/skills](https://github.com/mattpocock/skills) (MIT, © Matt Pocock), сведённый к одной функции: зафиксировать выбор готового решения так, чтобы через полгода не пришлось выбирать заново.
+Create a Verdict from verified research. Persist a Decision Record only after the user explicitly accepts that Verdict.
 
-## Когда писать
+## Verdict
 
-Все три условия, иначе не пишем:
+Refuse a final Verdict when coverage is `PROVISIONAL` or the Core gate is incomplete. Mark missing planned source coverage `PARTIAL` without hiding the affected classes.
 
-1. **Необратимо** — передумать позже дорого. Замена оркестратора — да, установка форматтера — нет.
-2. **Неочевидно снаружи** — будущий читатель посмотрит на репозиторий и спросит «почему так?».
-3. **Результат реального выбора** — альтернативы были, выбрали по причинам.
+For a valid Verdict, state:
 
-«Взяли Kestra и выкинули свой оркестратор» проходит все три. «Поставили prettier» — ни одного. Если решение легко откатить, его откатят и без записи. Если оно никого не удивит, никто и не спросит. Если альтернатив не было, записывать нечего.
+- coverage status and adoption mode: `deploy`, `package`, `compose`, `extend-core`, `hard-fork`, or `assemble`;
+- one Core, its upstream or fork, and version or commit when applicable;
+- Candidate roles: `base`, `fork`, `donor`, `plugin`, `sidecar`, `alternative`;
+- each donor's function, license basis, and integration method: `plugin`, `api`, `sidecar`, `cherry-pick`, or `port`;
+- a gain, cost, and score comparison with rejected alternatives and reasons;
+- up to three adjacent capabilities already in the selected Core;
+- separate sections for "already included, enable?" and "later, do not build";
+- the next post-acceptance action, without implementing it.
 
-Что почти всегда квалифицируется: выбор с вендор-локом (база, брокер, провайдер аутентификации, платформа деплоя), `hard-fork` — потому что он обрывает связь с апстримом навсегда, замена собственного кода чужим продуктом, и **сознательный отказ** от очевидного кандидата — иначе его предложат снова через три месяца.
+Do not propose `hard-fork` without measured code, data, and integration migration costs, or without comparison to extending the current system. Do not copy donor code when its license does not permit the intended use.
 
-## Куда писать
+## Acceptance gate
 
-`~/.claude/wheel/decisions/<slug>.md` — глобально, `./.claude/wheel/decisions/<slug>.md` — для конкретного проекта. При конфликте побеждает проектное. Каталог создавай лениво, при первой записи.
+Record only when all conditions hold:
 
-Без явного подтверждения пользователя не сохраняй ничего. Спроси, куда писать.
+1. Reversing the decision is expensive.
+2. The choice is not obvious to a future reader.
+3. Real alternatives were considered and rejected for recorded reasons.
+4. The user explicitly accepted this Verdict and selected global or project scope.
 
-## Формат
+Do not store Wheel's recommendation as a user preference before explicit acceptance. A recommendation that fails the first three conditions remains an unpersisted result.
+
+## Decision Record
+
+Render a stable, Clausative Markdown record from the runtime decision JSON. Its front matter contains a stable kebab-case `name`, `coverage`, `verdict`, `picked`, `maturity`, and `date`. Its sections are:
 
 ```md
----
-name: <kebab-case-slug>
-verdict: deploy | package | compose | extend-core | hard-fork | assemble
-picked: <owner/repo или название продукта>
-maturity: A | B | C | D
-date: YYYY-MM-DD
----
-
-## Запрос
-<с чем пришёл пользователь, одной-двумя фразами>
-
-## Кандидаты
-| Решение | Зрелость | Покрывает | Что ещё умеет | Лицензия | Вход |
-|---|---|---|---|---|---|
-
-## Решили
-<что и почему; чем проиграли остальные>
-
-## Уже в коробке (включить?)
-<фичи выбранного решения, которые достаются даром>
-
-## Придут позже (не строим)
-<смежные задачи, за которыми пользователь вернётся>
+## Request
+## Coverage
+## Candidates
+## Decided
+## Core and integration
+## Donors and licenses
+## Rejected alternatives
+## Already included, enable?
+## Later, do not build
 ```
 
-Строка в `INDEX.md` каталога: `- [<name>](<slug>.md) — <verdict>: <picked>`.
+The record includes the accepted Core, upstream or fork, donors, integrations, licenses, rejection reasons, adjacent capabilities, and deferred functions. It contains no secrets, cookies, unverified claims, or full implementation plan.
 
-Секции «Кандидаты» и «Придут позже» — то, ради чего запись существует. Первая избавляет от повторного поиска, вторая ловит момент, когда пользователь возвращается с ровно той задачей, которую ты предсказал.
+After acceptance, prepare the decision JSON and call runtime `record-decision` with the selected `global` or `project` scope. Supply a project root or home override only when the caller provided it. Let the runtime write the portable journal under `WHEEL_HOME/decisions` for global scope or `.wheel/decisions` for project scope, update the stable-slug record, and maintain its index. Do not invent a path outside those roots.
 
-## Чем это не является
-
-Запись фиксирует **выбор**, а не устройство системы. Ни архитектуры, ни схем данных, ни инструкций по установке — для этого есть документация выбранного продукта, и дублировать её здесь значит обречь себя её поддерживать.
-
-Отдельная запись на каждое решение. Не собирай журнал: слитый файл никто не найдёт `grep`-ом по тегу.
+If the host exposes safe memory writing, request a short accepted-decision summary only after `record-decision` succeeds. If it does not, the portable journal is the only persistence. Propagate persistence errors and do not claim the run is `recorded` until the runtime confirms it.

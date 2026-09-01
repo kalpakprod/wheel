@@ -1,28 +1,34 @@
-#!/bin/bash
-# wheel: inject the market-first gate into session context
+#!/bin/sh
+# wheel: inject the optional Claude Code gate into session context
 
-# The project catalog the skill greps at S3 is refreshed daily, so it ships apart from
-# the plugin. Check at most once a day and update in the background: the session must not
-# wait on the network, and a missing catalog is not an error.
-WHEEL_DIR="${WHEEL_HOME:-$HOME/.claude/wheel}"
-if [ -z "$(find "$WHEEL_DIR/catalog.meta.json" -mtime -1 2> /dev/null)" ]; then
-    ("${CLAUDE_PLUGIN_ROOT:-$(dirname "$0")/..}/scripts/catalog-update.sh" > /dev/null 2>&1 &) 2> /dev/null
+wheel_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd) || wheel_root=""
+wheel_python=""
+
+for candidate in python3.14 python3.13 python3.12 python3.11 python3 python; do
+  if command -v "$candidate" >/dev/null 2>&1 \
+    && "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' >/dev/null 2>&1; then
+    wheel_python=$(command -v "$candidate")
+    break
+  fi
+done
+
+if [ -z "$wheel_python" ] || [ -z "$wheel_root" ]; then
+  printf '%s\n' 'Wheel: Python 3.11+ is unavailable; managed DonSeTch bootstrap was skipped.' >&2
+elif [ "${WHEEL_NO_BOOTSTRAP:-}" = "1" ]; then
+  printf '%s\n' 'Wheel: managed DonSeTch bootstrap skipped (WHEEL_NO_BOOTSTRAP=1).' >&2
+  "$wheel_python" "$wheel_root/scripts/wheel.py" dependencies --json >/dev/null 2>&1 || true
+else
+  # No generic install hook exists. SessionStart is the first portable activation point.
+  printf '%s\n' 'Wheel: DonSeTch 3.4.4, AGPL-3.0-only, https://github.com/dondai44423/donsetch.' >&2
+  if ! "$wheel_python" "$wheel_root/scripts/wheel.py" dependencies --ensure --check-latest --json >/dev/null 2>&1; then
+    printf '%s\n' 'Wheel: managed DonSeTch bootstrap failed; dependent routes will report their own status.' >&2
+  fi
 fi
 
 cat <<'EOF'
 <wheel-rule>
-Before implementing ANY user request that creates or changes functionality — a new project, a feature in an existing one, an integration, an automation, a UI, a script — you MUST run the `wheel` skill FIRST, before writing code or a plan.
+For any non-trivial request that creates or changes functionality, invoke the `wheel` skill first, before planning or writing code. The user may explicitly decline this gate.
 
-The gate in short:
-1. Classify the request: greenfield / feature-in-existing / replace. On "feature", also check whether the user's whole project is a reinvention of an existing product — that is the most commonly missed case.
-2. Take stock of what is already installed (skills, plugins, tools) before searching the market.
-3. Search for existing solutions in this order: ~/.claude/wheel/decisions/ (past verdicts, skip silently if absent) -> GitHub search -> awesome-lists -> web. Target 4-8 candidates.
-4. Interview the user with questions DERIVED FROM THE DIFFERENCES between candidates. A question is legal only if its answer changes the candidate list. Fewer candidates -> deeper interview. Zero candidates means the interview continues, NOT that you start coding.
-5. Score maturity (node scripts/maturity.mjs) and measure three gaps: functional, operational, architectural. Pick an adoption mode: deploy / package / compose / extend-core / hard-fork / assemble.
-6. "Write it from scratch" is NOT a valid verdict. The worst case is `assemble` — building from other people's pieces and reference points.
-
-Never replace a user's existing project with a third-party one without a measured cost (code size, data volume, integrations), and never present replacement without showing `extend` next to it.
-
-Skip the gate only for trivial mechanical edits (a typo, a rename, a one-line config change) or when the user explicitly declines it.
+Skip the gate for trivial mechanical edits or when the user explicitly declines it.
 </wheel-rule>
 EOF

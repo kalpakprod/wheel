@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "dependencies": [
+    {
+      "id": "donsetch",
+      "tested_version": "3.4.4",
+      "source_repository": "dondai44423/donsetch",
+      "release_base_url": "https://github.com/dondai44423/donsetch/releases/download",
+      "license": "AGPL-3.0-only",
+      "license_url": "https://spdx.org/licenses/AGPL-3.0-only.html",
+      "check_interval_seconds": 86400,
+      "platforms": [
+        {
+          "system": "Windows",
+          "machine": "AMD64",
+          "asset": "donsetch-win32-x64.tar.gz",
+          "binary": "donsetch.exe",
+          "required_files": ["donsetch.exe", "pdfium.dll"],
+          "sha256": "cd39af6bd05561fb4fe8dd315d1eff462cfdd1b2b426035a3f2fa993bdd55180"
+        },
+        {
+          "system": "Linux",
+          "machine": "x86_64",
+          "asset": "donsetch-linux-x64.tar.gz",
+          "binary": "donsetch",
+          "required_files": ["donsetch", "libonnxruntime.so"],
+          "sha256": "d31e2e75a791332c4c7273f1acfa6bb9cb9585bb6f950c91ed621ae04d735d35"
+        },
+        {
+          "system": "Linux",
+          "machine": "aarch64",
+          "asset": "donsetch-linux-arm64.tar.gz",
+          "binary": "donsetch",
+          "required_files": ["donsetch"],
+          "sha256": "3f7366337290d5a2085e6d3de2483e1e26cd00c03aeb775d04d488e7f71d87e9"
+        },
+        {
+          "system": "Darwin",
+          "machine": "x86_64",
+          "asset": "donsetch-darwin-x64.tar.gz",
+          "binary": "donsetch",
+          "required_files": ["donsetch"],
+          "sha256": "2e11df5fd1a6f7ea4aadfe73e8ca2ab6656790870904a8071854984076bf4f0f"
+        },
+        {
+          "system": "Darwin",
+          "machine": "arm64",
+          "asset": "donsetch-darwin-arm64.tar.gz",
+          "binary": "donsetch",
+          "required_files": ["donsetch"],
+          "sha256": "7edb92ef3d686b2e2fac3c6925e61117edf71cfa5413b0be55afacfeee49f49f"
+        }
+      ]
+    }
+  ]
+}

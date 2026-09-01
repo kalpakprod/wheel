@@ -1,0 +1,147 @@
+# Access routes for live Wheel research. Entries describe sources, not products.
+# An optional source remains visible in coverage when unavailable; it is never
+# replaced silently by another route.
+#
+# Source classes: local records the request context and project facts;
+# repository records repository evidence; trend records current momentum;
+# community records independent discussion or usage; web records general and
+# official web evidence; documentation records read Candidate documentation,
+# installation instructions, changelogs, security policy, and licenses.
+#
+# The coverage matrix has one row for every planned class. A class is covered
+# only by verifiable Evidence from one of its planned routes. `COMPLETE` is
+# impossible unless every planned class, including documentation, is covered.
+
+- id: local-memory
+  class: local
+  capability: host-memory
+  quick: true
+  deep: true
+  adapter: host:memory
+  operations: [read]
+
+- id: project
+  class: local
+  capability: filesystem
+  quick: true
+  deep: true
+  adapter: local:project
+  operations: [instructions, files, dependencies, decisions]
+
+- id: github
+  class: repository
+  capability: gh
+  quick: true
+  deep: true
+  adapter: agent-reach:dev
+  browser_capability: opencli
+  operations: [search, repo, forks, issues, discussions, releases, code, tests, license, contributors]
+
+- id: gittrend
+  class: trend
+  capability: gittrend
+  quick: true
+  deep: true
+  adapter: agent-reach:dev
+  reader: donsetch:fetch
+  runtime_adapter: wheel:read-url
+  operations: [search, trending]
+
+- id: trendshift
+  class: trend
+  capability: trendshift
+  quick: true
+  deep: true
+  adapter: agent-reach:dev
+  reader: donsetch:fetch
+  runtime_adapter: wheel:read-url
+  operations: [search, trending]
+
+- id: web
+  class: web
+  capability: agent-reach
+  quick: true
+  deep: true
+  adapter: agent-reach:dev
+  reader: donsetch:fetch
+  runtime_adapter: wheel:read-url
+  reader_mode: conditional
+  reader_conditions: [dynamic-page, js-shell, bot-wall, incomplete-default-reader]
+  browser_capability: opencli
+  browser_session: existing-authenticated
+  operations: [search, read, official]
+
+- id: documentation
+  class: documentation
+  capability: agent-reach
+  quick: true
+  deep: true
+  adapter: agent-reach:dev
+  reader: donsetch:fetch
+  runtime_adapter: wheel:read-url
+  reader_mode: conditional
+  reader_conditions: [dynamic-page, js-shell, bot-wall, incomplete-default-reader]
+  browser_capability: opencli
+  browser_session: existing-authenticated
+  operations: [official, documentation, installation, changelog, security, license]
+
+- id: last30days
+  class: community
+  capability: last30days
+  optional: true
+  quick: true
+  deep: true
+  adapter: last30days:search
+  operations: [search, discussion]
+
+- id: reddit
+  class: community
+  capability: reddit-skill
+  quick: true
+  deep: true
+  adapter: reddit-skill:search
+  operations: [search, discussion]
+
+- id: telegram
+  class: community
+  capability: telegram-channel-parser
+  quick: true
+  deep: true
+  adapter: telegram-channel-parser:search
+  operations: [search, discussion]
+
+- id: hackernews
+  class: community
+  capability: agent-reach
+  quick: true
+  deep: true
+  adapter: agent-reach:dev
+  operations: [search, discussion]
+
+- id: x
+  class: community
+  capability: x-research
+  optional: true
+  login_backed: true
+  quick: true
+  deep: true
+  adapter: x-research:search
+  operations: [search, discussion]
+
+- id: youtube
+  class: community
+  capability: agent-reach
+  optional: true
+  login_backed: true
+  quick: true
+  deep: true
+  adapter: agent-reach:dev
+  operations: [search, discussion]
+
+- id: v2ex
+  class: community
+  capability: agent-reach
+  quick: true
+  deep: true
+  adapter: agent-reach:dev
+  operations: [search, discussion]

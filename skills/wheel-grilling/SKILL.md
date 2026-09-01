@@ -1,60 +1,48 @@
 ---
 name: wheel-grilling
-description: Interview the user to narrow down a list of existing solutions. Use from the wheel pipeline (S2) after a first market pass, or whenever a choice between candidate products, repos or libraries has to be made. Questions are derived from how the candidates actually differ, and a question is only legal if its answer removes candidates from the list.
+description: Internal Wheel questioning stage that reduces live-researched Families and Candidates. Use only from wheel after its quick pass or after one user answer; emit exactly one legal next question or declare the Candidate set stable.
 ---
 
-# wheel-grilling: допрос, который сокращает список
+# wheel-grilling
 
-Форк `grilling` из [mattpocock/skills](https://github.com/mattpocock/skills) (MIT, © Matt Pocock), адаптированный под отбор готовых решений. Оригинал допрашивает, чтобы спроектировать систему. Этот — чтобы **выбрать уже написанную**.
+Turn the researcher's Families, Candidates, Evidence, and decision axes into one user decision at a time. `wheel-grilling` is the sole owner of question construction and emission. Facts are the researcher's job. User preferences decide among fact-backed options.
 
-## Механика
+## Legal question
 
-Дерево решений. Каждое решение ветвится на те, что зависят от него.
+A question is legal only when at least one possible answer changes the surviving Families, Candidates, possible Core, or integration method. Never ask about an implementation detail already supplied by every remaining Candidate.
 
-Работай **раундами**. **Фронтир** — все решения, чьи предпосылки уже закрыты: вопросы, которые можно задать *сейчас*, не угадывая ответов, которых ты ещё не слышал. Задавай весь фронтир одним раундом: нумеруй вопросы и к каждому давай свою рекомендацию. Потом жди ответов.
+Emit exactly one question per user turn. It includes:
 
-Каждый ответ пересобирает дерево: закрытые решения выталкивают фронтир наружу и разблокируют то, что от них зависело. Пересчитай фронтир, задай следующий раунд. Вопрос, ответ на который зависит от другого вопроса, открытого в этом же раунде, относится к *следующему* раунду, не к текущему.
+- the choice in plain language;
+- answer options;
+- Families and Candidates affected by every option;
+- a recommendation grounded in a verified fact;
+- the Candidate-count consequence when known.
 
-**Факты — твоя работа, никогда не пользователя.** Нужен факт из среды (файлы, GitHub API, зрелость репозитория, наличие Dockerfile) — добудь сам, при необходимости субагентом. Не блокируйся: незавершённая проверка — это незакрытая предпосылка, поэтому ждут только вопросы ниже по дереву, остальной фронтир задавай сейчас. **Решения — пользователя.** Каждое ставь перед ним и жди.
-
-## Правило отсечения
-
-> **Вопрос легален, только если его ответ меняет список кандидатов.**
-
-Если при любом ответе остаются те же репозитории — вопрос не задаётся. Он про реализацию, а реализацию делает выбранный продукт, не мы.
-
-Это заменяет стоп-критерий оригинала. Сессия закончена не когда обойдено всё дерево, а когда **ни один оставшийся вопрос не сокращает список**.
-
-## Откуда берутся вопросы
-
-**Первый раунд, до поиска** — только то, что режет класс решений целиком. Не больше четырёх: self-host или SaaS, рантайм и язык, лицензионные ограничения, горизонт (прод, прототип, разовая задача).
-
-**Дальше — из различий между кандидатами.** Возьми найденные проекты, найди оси, по которым они реально расходятся, каждая ось становится вопросом. Совпадающее не спрашивай никогда: если все пятеро умеют вебхуки, вопрос про вебхуки бессмысленный.
-
-## Формат вопроса
-
-К каждому вопросу — цена ответа в кандидатах и твоя рекомендация:
-
-```
-❓ **Q1** — **Вес**: комбайн с UI и сотнями интеграций или движок без UI?
-
-   комбайн → n8n, Windmill              (2 кандидата)
-   движок  → Kestra, Prefect, Temporal  (3 кандидата)
-
-➡️ Рекомендую движок: у тебя уже свой фронт, UI будет дублировать.
+```text
+Question: Managed service or self-hosted Core?
+Managed service: affects Family A; keeps Candidate 1 and Candidate 2.
+Self-hosted: affects Family B; keeps Candidate 3 and Candidate 4.
+Recommendation: self-hosted, because the project instruction requires local data control.
 ```
 
-Рекомендация обязана опираться на добытый факт — состав проекта пользователя, зрелость репозитория, лицензию, — а не на вкус.
+Do not present a recommendation as a user preference. Do not ask a second question while waiting for an answer.
 
-## Глубина обратна числу кандидатов
+## Flow
 
-| Кандидатов | Раундов | Логика |
-|---|---|---|
-| больше 8 | 1–2 | различия очевидны, отсекаем быстро |
-| 3–8 | 2–3 | диф даёт точные вопросы |
-| 1 | 2–4 | проверяем, что он действительно подходит |
-| 0 | **пока не найдётся зацепка** | каждый ответ — новый поисковый запрос |
+1. After the Quick pass, derive and emit the next legal question from the supplied three to six Families, Candidates, Evidence, and decision axes.
+2. After each answer, update requirements and request bounded research only for the affected branch.
+3. Recompute the remaining Candidates, Candidate roles, and integration methods before proposing another question.
+4. Continue only while a legal answer can change the final set.
+5. Declare grilling stable when no remaining answer changes the final Candidate set, or when the user explicitly delegates the choice to Wheel.
 
-Пустой список кандидатов допрос не завершает, а запускает всерьёз. Любая деталь ответа — смежная область, соседняя ниша, другое название той же задачи, другой язык, другая индустрия — уходит новым запросом в поиск.
+If no Candidate remains, keep grilling and hand every new constraint, synonym, adjacent niche, or English term to `wheel-research` as a new search lead. Zero Candidates never authorizes a new implementation.
 
-К реализации не переходи, пока пользователь не подтвердил, что понимание общее.
+## Handoff
+
+Return one of:
+
+- `question`: one legal question with affected Families and Candidates;
+- `stable`: remaining Candidates, answered constraints, eliminated Candidates and reasons, and any unresolved verification.
+
+Wheel starts deep research only from `stable`.

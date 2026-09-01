@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "wheel",
-  "description": "The wheel already exists: a market-first gate for Claude Code that finds ready solutions before any line of code is written.",
+  "description": "Live market-first research for Claude Code with an on-demand managed DonSeTch dynamic-page reader in a separate process; DonSeTch is not bundled.",
   "owner": {
     "name": "kalpakprod",
     "url": "https://github.com/kalpakprod"
@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "wheel",
-      "description": "Before any build request, the agent searches the market for existing solutions, scores their maturity, measures the functional/operational/architectural gap, grills the user with questions derived from candidate differences, and returns an adoption mode instead of new code. Includes /wheel.",
+      "description": "Before implementation, Wheel runs live quick discovery and deep verification, chooses among six adoption modes, selects base and donor candidates, and uses the managed DonSeTch dynamic-page reader for dynamic pages. DonSeTch is fetched on demand in a separate process and is not bundled. Includes /wheel.",
       "source": "./",
       "category": "productivity"
     }

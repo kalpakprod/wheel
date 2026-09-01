@@ -1,6 +1,8 @@
 # Распространение каталога проектов
 
-Дата: 2026-08-18. Статус: согласовано, к реализации.
+> Superseded on 2026-08-30 by [docs/specs/2026-08-30-live-market-orchestrator-design.md](./2026-08-30-live-market-orchestrator-design.md). The historical body below is retained for provenance.
+
+Дата: 2026-08-18. Статус: superseded новой спецификацией.
 
 ## Запрос
 

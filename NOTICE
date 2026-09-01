@@ -21,3 +21,21 @@ Changes made in this fork:
                     replaces the ADR template with a candidate-comparison record.
 
 The MIT license text of the original is reproduced in LICENSE-mattpocock.
+
+DonSeTch
+--------
+
+Wheel supports DonSeTch 3.4.4 as an external managed dependency:
+
+    DonSeTch: https://github.com/dondai44423/donsetch
+    Version: 3.4.4
+    License: AGPL-3.0-only, https://github.com/dondai44423/donsetch/blob/v3.4.4/LICENSE
+
+DonSeTch is not included in the Wheel source tree, plugin archive, or release
+assets. On first activation, Wheel downloads the official DonSeTch release
+asset directly from the upstream repository, verifies the pinned checksum, and
+invokes the binary as a separate process through the CLI/JSON boundary.
+
+Wheel does not modify, link, or redistribute DonSeTch source or binaries. Any
+modified or redistributed DonSeTch copy remains subject to its AGPL obligations;
+this notice is an attribution and engineering-boundary statement, not legal advice.

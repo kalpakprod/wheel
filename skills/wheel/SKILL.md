@@ -1,281 +1,65 @@
 ---
 name: wheel
-description: Use BEFORE writing any new code, adding a feature, starting a project, or planning an implementation. Finds existing solutions on the market (repos, skills, plugins, products), measures the gap between what they give and what the user needs, interviews the user with candidate-derived questions, and picks an adoption mode (deploy/package/compose/extend-core/hard-fork/assemble). Writing code from scratch is not a valid outcome.
+description: Use for any meaningful request to create or change functionality before implementation. Skip only an explicitly declined Wheel run or a trivial mechanical edit; Wheel performs live market discovery, candidate-derived questioning, verification, and an adoption verdict.
 ---
 
-# wheel: колесо уже изобретено
+# Wheel
 
-Пользователь пришёл с задачей. Задача — это **любое** его требование: новый проект, фича в существующий код, замена того, что уже написано, «просто добавь кнопку». Во всех случаях сначала отвечаем на вопрос «это уже собрано кем-то?», и только потом трогаем код.
+Wheel finds and verifies an existing software foundation before any implementation plan. It does not propose new code until a verified Gap remains after the Verdict.
 
-**Вердикта «пишем с нуля» не существует.** Худший исход называется `assemble` — сборка из чужих кусков и ориентиров. Если кажется, что аналогов нет, это значит, что грилинг не закончен, а не что пора кодить.
+Use Wheel for every meaningful request to create or change functionality, including a feature, behavior-changing fix, replacement, or new product. Do not require the user to name an architectural choice. Skip Wheel only when the user explicitly declines it or the request is a trivial mechanical edit, such as a typo, mechanical rename, or one-line non-functional configuration change. If a request combines mechanical edits with a meaningful functional change, run Wheel.
 
-## Конвейер
+## Run contract
 
-Шаги не пропускаются и не переставляются.
+Create or resume one runtime run for the current request. Advance it in this order:
 
-| Шаг | Что делает | Выход |
-|---|---|---|
-| `S0` | классификация задачи и носителя | теги + тип запроса |
-| `S1` | инвентарь: что у пользователя уже есть | список скиллов ко включению |
-| `S2` | грилинг: вопросы, режущие кандидатов | отфильтрованный список |
-| `S3` | рынок: поиск кандидатов | 4–8 репозиториев |
-| `S4` | зрелость × зазор × пригодность → режим внедрения | таблица со `score` |
-| `S5` | forward-look | «в коробке» / «придёт позже» |
-| `S6` | вердикт + запись в базу | решение |
+`context` -> `quick` -> `question` -> `deep` -> `verify` -> `decision` -> `recorded`
 
-`S2` и `S3` идут внахлёст: первый проход поиска даёт материал для точных вопросов, ответы дают новые запросы. Цикл до пустого фронтира.
+Resolve `<wheel-root>` from this loaded `SKILL.md`: its directory is `<wheel-root>/skills/wheel`. Require `<wheel-root>/scripts/wheel.py`, `<wheel-root>/registry/capabilities.yaml`, and `<wheel-root>/registry/sources.yaml` to exist. Use `python "<wheel-root>/scripts/wheel.py"` for every runtime call regardless of the current project directory, and pass the resolved runtime and registry paths to internal Wheel skills. Do not guess another install path or fall back to a project-relative `scripts/wheel.py`.
 
----
+Before `doctor` and context collection, run `python "<wheel-root>/scripts/wheel.py" dependencies --ensure --check-latest --json` once unless `WHEEL_NO_BOOTSTRAP=1`. The mandatory latest-release check uses its 24-hour public metadata cache. Before the first download, report `DonSeTch 3.4.4`, `AGPL-3.0-only`, and `https://github.com/dondai44423/donsetch`. A generic install hook does not exist, so this first Wheel activation is the portable bootstrap point. With `WHEEL_NO_BOOTSTRAP=1`, do not install; collect diagnostics only.
 
-## S0 — классификация
+Persist a safe dependency status in `tool_snapshot`, never raw command output, credentials, cookies, or other secrets. Preserve the dependency's reported status, tested version, installed version when present, checked time, and concise non-sensitive detail. If bootstrap fails, continue once with its dependent Source routes honestly `unavailable` or `error`; do not retry the same failure cause more than once.
 
-Два независимых измерения. Оба обязательны.
+Before live research, read the current request, safe host memory, applicable project instructions, relevant project and global Decision Records, and `doctor --json`. The current request overrides project decisions; project decisions override global decisions; a fresh doctor result overrides an old snapshot.
 
-**Тип запроса** — определяет, что вообще можно предложить:
+Persist the full current value of every workflow-owned field with `python "<wheel-root>/scripts/wheel.py" update-run --run-id <run-id> --input <json> [--home <wheel-home>]` at its checkpoint. An update replaces each named field; never send a partial replacement for `context`, `families`, `user_answers`, `tool_snapshot`, `candidates`, or `edges`.
 
-| Тип | Признак | Что появляется в вариантах |
-|---|---|---|
-| `greenfield` | кода ещё нет | всё |
-| `feature` | есть проект, нужна фича | `extend` своего + замена целиком |
-| `replace` | явно просят заменить | только чужие решения |
+Use `<wheel-root>/registry/capabilities.yaml` to derive search terms, topics, and suitable installed skills. Route research through `<wheel-root>/registry/sources.yaml`; neither registry recommends a product.
 
-При `feature` **всегда** проверяй, не является ли существующий проект пользователя переизобретением готового продукта. Человек просит фичу, потому что не знает, что весь его проект уже есть в готовом виде. Это самый частый пропущенный случай.
+## Orchestration
 
-**Теги задачи** — из `registry/capabilities.yaml`, поле `triggers`. Если ни один не сработал — задай теги сам и в `S6` предложи дописать запись в реестр.
+1. Create the run with `init-run`. While it remains in `context`, gather the required context and the fresh doctor result, then use `update-run` to save the complete `context` and `tool_snapshot`.
+2. Transition directly from `context` to `quick`, then invoke `wheel-research` for the Quick pass. It must run before any user question. After the pass completes, `wheel-research` uses `update-run` to save the complete `families`, `candidates`, and `edges`.
+3. Send the persisted Quick pass's Families, Candidates, Evidence, and decision axes to `wheel-grilling`. It alone returns the one candidate-changing question or `stable`. If it returns a question, transition to `question` and stop. Ask no second question in the same user turn.
+4. On the next user answer, append the answer to the complete `user_answers` list with `update-run` before passing the persisted Candidates and answer to `wheel-grilling`. It alone may return one new candidate-changing question or declare the set stable.
+5. Invoke the Deep pass only after grilling is stable or the user explicitly delegates the choice. `wheel-research` persists the complete `candidates` and `edges` with `update-run` after each completed deep checkpoint; transition through `deep` and `verify` as the passes complete.
+6. Evaluate the verified Candidates with `wheel-decision`. It produces the Verdict or reports that the gate is incomplete.
+7. After explicit user acceptance only, invoke `wheel-decision` to create the Decision Record and ask the runtime `record-decision` command to persist it. Transition to `recorded` only after successful persistence.
 
-## S1 — инвентарь возможностей
+Internal skills are not alternative user-facing workflows. Do not expose them as commands or substitute them for Wheel.
 
-До поиска на рынке проверь, что уже под рукой:
+## Question invariant
 
-1. `grep` по `registry/capabilities.yaml` — какие скиллы/плагины сопоставлены тегам задачи.
-2. Что из них уже установлено (`~/.claude/skills/`, `~/.claude/plugins/`, список доступных скиллов в сессии).
-3. Чего не хватает — предложи поставить: для проектных технологий это `npx autoskills` (детект по `package.json` и конфигам), для точечных — прямая ссылка.
+`wheel-grilling` is the sole owner of user questions. Ask exactly one question per user turn. A question is legal only when at least one answer changes a Family, Candidate, Core, or integration method. Each question states affected Candidates or Families and a fact-backed recommendation. If no legal question remains, grilling is stable.
 
-Скажи вслух, что включаешь: «беру скиллы X, Y — они про эту задачу». Дальше работай ими.
+## Verdict gate
 
-## S2 — грилинг
+A result begins with coverage state and adoption mode. It names the Core, upstream or fork, version or commit when applicable, selected donor functions and license-compatible integration, rejected alternatives, and up to three adjacent capabilities already provided by the Core. It also separates "already included, enable?" from "later, do not build".
 
-Вызови скилл `wheel-grilling` — дерево решений, фронтир, раунды, у каждого вопроса твоя рекомендация, факты добываешь сам, решения оставляешь пользователю.
+Use the adoption modes `deploy`, `package`, `compose`, `extend-core`, `hard-fork`, and `assemble`. Preserve Candidate roles `base`, `fork`, `donor`, `plugin`, `sidecar`, and `alternative`.
 
-Одно правило поверх механики:
+No final Verdict is allowed unless the research result has the required Core gate:
 
-> **Вопрос задаётся, только если его ответ меняет список кандидатов.**
+- Open Core: code, documentation, license, activity, tests, and an independent usage signal.
+- Closed service: official documentation, terms, cost, integrations, data-export path, and an independent usage signal.
 
-Если при любом ответе остаются те же репозитории — вопрос не задаётся. Он про реализацию, а реализацию делает выбранный продукт, не мы.
+Any planned source class without verifiable data makes coverage `PARTIAL`; this includes the `documentation` class. `COMPLETE` is allowed only when every planned class, including `documentation`, has coverage in the matrix. An incomplete Core gate makes it `PROVISIONAL`, which forbids the final Verdict. A missing Candidate does not authorize building from scratch; continue candidate-changing research.
 
-**Два типа вопросов.**
+`hard-fork` requires measured code, data, and integration migration costs and comparison with extending the current system. Prefer `plugin` or `api` integration over Core modification; name the reason when `extend-core` or `hard-fork` is necessary.
 
-*До поиска* — только то, что режет класс решений. Не больше четырёх: self-host / SaaS, рантайм и язык, лицензионные ограничения, горизонт (прод / прототип / разово).
+## Boundaries
 
-*После первого прохода* — вопросы **вычисляются из различий между кандидатами**. Возьми найденные проекты, найди оси, по которым они реально расходятся, каждая ось — вопрос. Совпадающее не спрашивай никогда.
+During research, read only. Do not install, execute, authenticate to, import, publish, or change a Candidate. Do not persist a Decision Record or host-memory summary until the user explicitly accepts the Verdict. Do not save secrets, cookies, unverified assumptions, or rejected Candidates as preferences.
 
-Формат вопроса — с ценой ответа в кандидатах:
-
-```
-❓ Q1 — Вес: комбайн с UI и сотнями интеграций или движок без UI?
-
-   комбайн → n8n, Windmill        (2 кандидата)
-   движок  → Kestra, Prefect, Temporal (3 кандидата)
-
-➡️ Рекомендую движок: у тебя уже свой фронт, UI будет дублировать.
-```
-
-**Глубина обратна числу кандидатов.**
-
-| Кандидатов | Раундов | Логика |
-|---|---|---|
-| больше 8 | 1–2 | различия очевидны, отсекаем быстро |
-| 3–8 | 2–3 | диф даёт точные вопросы |
-| 1 | 2–4 | проверяем, что он правда подходит |
-| 0 | **пока не найдётся зацепка** | каждый ответ — новый запрос в поиск |
-
-Пустой результат грилинг не завершает, а запускает всерьёз. Любая деталь ответа — смежная область, соседняя ниша, другое название той же задачи, другой язык, другая индустрия — уходит новым поисковым запросом. К коду не переходим, пока планирование не закрыто.
-
-## S3 — рынок
-
-**Свежий поиск обязателен всегда.** Локальные источники дают быстрый стартовый список, но каталог отстаёт от рынка на дни и недели, а решения — на месяцы. Остановиться на них означает раз за разом выбирать вчерашний инструмент: узкий специализированный проект, вышедший полгода назад, в них просто не успел попасть. Поиск по рынку (пункты 3–5) выполняется даже тогда, когда каталог уже дал восемь кандидатов.
-
-Источники в порядке дешевизны, но ни один из них не отменяет следующий:
-
-1. `~/.claude/wheel/decisions/` — решения, уже принятые этим пользователем. Читай `INDEX.md`, затем только релевантные записи. Каталога нет — молча пропусти.
-2. Каталог проектов: `~/.claude/wheel/catalog.local.jsonl` (свой, если пользователь собирает его сам), затем `~/.claude/wheel/catalog.jsonl` (общий, обновляется фоном раз в сутки). По строке JSON на проект, только `grep`, файл не читается целиком.
-
-       grep -i '"keywords": \[[^]]*оркестрац' ~/.claude/wheel/catalog.jsonl
-       grep -i '"problem": "[^"]*очеред' ~/.claude/wheel/catalog.jsonl
-       grep -i '"alt": \[[^]]*n8n' ~/.claude/wheel/catalog.jsonl
-
-   Ищи в таком порядке: `keywords` (термины ниши на русском и английском), `problem` (задача словами ищущего), `alt` (чем проект заменяют — так кандидат находится через имя известного конкурента), и только потом `tags`, набор которых узкий.
-
-   Поля: `slug`, `url`, `summary`, `problem`, `audience`, `alt`, `keywords`, `pros`, `cons`, `stacks`, `stack`, `deploy`, `selfhost`, `mode`, `gap_ops`, `risks`, `level`, `deploy_gap`, `stars`, `pushed_at`, `lang`, `license`, `mentions`, `chats`. Запись отсюда — уже разобранный кандидат: зрелость посчитана, репозиторий заново читать не надо. `mode` — предварительная подсказка режима внедрения для `S4`, а `deploy`, `selfhost`, `stack` и `gap_ops` закрывают операционный зазор; чтением исходников остаётся проверить только архитектурный зазор у двух финалистов. `chats` считает, в скольких **разных** сообществах о проекте говорили: два независимых упоминания весят больше тысячи звёзд, потому что звёзды копятся годами, а разговор идёт про то, чем пользуются сейчас. Файла нет — молча пропусти, он подтянется сам.
-
-   `pros`, `cons` и `stacks` заполняются на шаге `S2`: `cons` даёт готовые вопросы к пользователю («оверхед по токенам» — спроси, сколько у него файлов; «нет Windows-сборки» — спроси, где запускать), `stacks` отсекает кандидата, который не встаёт в его среду, ещё до чтения исходников. Отсутствие минусов у карточки означает, что их не нашли, а не что их нет.
-
-   Оценки «стоит ли ставить» в общем каталоге нет намеренно: она зависит от того, что уже есть в стеке у конкретного человека. Меряй пригодность сам, на шаге `S4`.
-
-   В своём каталоге могут быть дополнительные поля — `tier`, `useful`, `verdict`. **Они вынесены вне задачи и потому не отбрасывают кандидата.** Проект, помеченный «пропустить» при общем взгляде, под конкретную задачу бывает лучшим: узкая библиотека для одного формата бесполезна «вообще» и незаменима, когда работа состоит ровно из этого формата. Такие поля повышают приоритет проверки и дают контекст, а решение выносится здесь и сейчас по трём осям `S4`. Отбросить кандидата ссылкой на прошлый тир нельзя.
-3. GitHub Search API. Два прохода, оба обязательны, потому что они находят разное:
-
-       gh search repos "<ключевые слова>" --sort stars --limit 20        # что укоренилось
-       gh search repos "<ключевые слова>" --sort updated --limit 20      # что вышло недавно
-       gh search repos "<термин ниши>" --created ">2025-08" --limit 20   # чего год назад не было
-
-   Сортировка по звёздам показывает вчерашний рынок: звёзды копятся годами, и специализированный инструмент, вышедший полгода назад, в этот срез не попадает никогда.
-4. `awesome-*` списки по теме — они уже курированы людьми.
-5. Обычный веб-поиск — для платных продуктов и того, что не живёт на GitHub.
-
-Если у пользователя есть собственный реестр софта в виде большого markdown-файла, ищи по нему только `grep` по тегам и ключевым словам — такие файлы обычно больше лимита чтения.
-
-Цель прохода — 4–8 кандидатов. Меньше трёх — расширь формулировку (синонимы, смежная ниша, английские термины). Больше десяти — не сужай поиск, а иди в `S2`: это работа вопросов, не фильтров.
-
-Платные продукты из поиска не выбрасывай. Они дают две вещи: планку функциональности и повод спросить «а бесплатный аналог этого подойдёт?».
-
-## S4 — зазоры, зрелость, пригодность, режим
-
-Три **независимые** оси. Не смешивать: зрелость говорит про риск, зазор — про объём работы, пригодность — про то, насколько хорошо кандидат делает именно эту работу.
-
-Две оси вместо трёх — это ошибка, которая систематически выбирает старое. Зрелость и зазор оба слепы к тому, что один кандидат читает PDF за 600 мс с сохранением таблиц, а другой — вдвое медленнее и теряет вёрстку: по обеим осям они выглядят одинаково, и побеждает тот, у кого больше звёзд, то есть тот, кто старше.
-
-### Ось риска: зрелость
-
-Считается скриптом, не рассуждением: `node scripts/maturity.mjs <owner/repo>`.
-
-Пять флагов — `alive` (пуш меньше 90 дней назад), `adopted` (500+ звёзд), `sustained` (2+ релиза за год), `safe` (OSI-лицензия, не архив), `bus` (3+ контрибьютора). Уровень: 5 флагов — `A`, 4 — `B`, 2–3 — `C`, меньше — `D`. Архивный репозиторий — всегда `D`.
-
-Уровень определяет только владение и внимание:
-
-| Уровень | Кто чинит | Что делаем |
-|---|---|---|
-| `A` | апстрим | берём как есть |
-| `B` | апстрим, мы читаем релизы | пинним версию |
-| `C` | мы | поддержку берём на себя осознанно |
-| `D` | никто | **донор**: берём код и решения, зависимость не заводим |
-
-`D` — не отказ. Мёртвый репозиторий с хорошей архитектурой это бесплатный проектный документ и легальный источник кода. В `assemble` он основной материал.
-
-**Поправки к уровню.** Флаги меряют историю, а история наказывает новое. Уровень поднимается на одну ступень, если выполнено хотя бы одно:
-
-- проект выпущен известной организацией, которая живёт этим направлением (нулевой bus-фактор компенсирован);
-- есть готовые бинарные пакеты под целевые платформы (проверять фактом: `pip index`, страница релизов, `npm view`), то есть установка не требует тулчейна;
-- проект младше года, но уже собрал независимые упоминания в разных сообществах.
-
-Так специализированный инструмент возрастом полгода перестаёт проигрывать формально по `sustained` тому, кто просто старше.
-
-### Ось пригодности: делает ли он именно эту работу
-
-Три вопроса, все — фактами из README, бенчмарков и кода, а не впечатлением:
-
-| Вопрос | Чем меряется | Почему важно |
-|---|---|---|
-| специализация | кандидат решает эту задачу или она у него одна из двадцати | специалист точнее комбайна на своей задаче; комбайн выигрывает, когда нужен охват |
-| цена исполнения | заявленная скорость, память, рантайм, наличие нативного ядра | на потоке разница в разы решает, влезает ли задача в окно |
-| качество результата | что именно возвращает: сохраняет структуру, позиции, таблицы, или плоский текст | потеря структуры отравляет всё, что стоит дальше по конвейеру |
-
-Правило разрешения: **при сопоставимом риске и сопоставимом зазоре выигрывает более пригодный, даже если он моложе и звёзд у него меньше.** Ссылаться на возраст как на аргумент можно только там, где он подтверждён фактом риска — архив, отсутствие релизов, единственный контрибьютор, закрытые issue без ответов.
-
-Обратное правило тоже есть: новизна сама по себе не аргумент. Молодой проект без вендора, без бинарных пакетов и без независимых упоминаний остаётся `C` и берётся донором, а не зависимостью.
-
-### Ось работы: три зазора
-
-| Зазор | Вопрос | Как меряется | Для кого |
-|---|---|---|---|
-| функциональный | умеет ли нужное | README, фич-лист, issues | **все кандидаты** |
-| операционный | разворачивается ли куда надо | `Dockerfile`, `compose`, `helm`, пакеты | **все кандидаты** |
-| архитектурный | лезет ли доработка в ядро | чтение исходников: есть ли плагины/хуки/API | **только 2 финалиста** |
-
-Первые два стоят один запрос к API и считаются тем же скриптом. Архитектурный требует чтения кода — его считаем после грилинга, когда финалистов осталось двое. Считать его для всех — это читать шесть проектов ради пяти, которые отвалятся на первом вопросе.
-
-### Режим внедрения — из зазоров
-
-| Режим | Функц. | Опер. | Архит. | Кто владеет |
-|---|---|---|---|---|
-| `deploy` | 0 | 0 | 0 | апстрим |
-| `package` | 0 | есть | 0 | апстрим + наш образ/чарт |
-| `compose` | есть | — | 0 | два апстрима + наш клей |
-| `extend-core` | есть | — | решается плагином | апстрим + наше расширение |
-| `hard-fork` | есть | — | только в ядро | **наше целиком** |
-| `assemble` | кандидата нет | — | — | наше, на чужих ориентирах |
-
-`package` существует отдельно от `deploy`, потому что идеальный софт, который ставится только нативно, а нужен в k8s — это день работы, а не «просто поставь».
-
-`compose` — «берём основной продукт и вкладываем в него кусок другого». Цена своя: два апстрима вместо одного, клей наш.
-
-**Граница `extend-core` / `hard-fork` — самая дорогая в таблице.** Первое сохраняет право тянуть обновления, второе его обрывает навсегда. Всегда называй явно, какой из двух предлагаешь, и почему изменение не помещается в плагин или хук.
-
-### Оценка
-
-Для каждого варианта — три числа по шкале 1–5:
-
-```
-gain  = покрытие запроса + пригодность (специализация, скорость, качество вывода) + смежные фичи даром
-cost  = внедрение + миграция данных + обучение + риск владения
-score = gain / cost
-```
-
-Показывай таблицей, вердикт формулируй словами. Числа — оценки, а не расчёт; они нужны, чтобы спорить предметно.
-
-## S5 — forward-look
-
-Ровно две секции, и они принципиально разные:
-
-**«Уже в коробке — включить?»** — только для того, что выбранное решение умеет само. Стоит ноль, поэтому предлагать честно: за это уже заплачено, вопрос лишь во включении.
-
-**«Придёт позже — не строим»** — список смежных задач, за которыми пользователь вернётся. Записывается в решение, кодом не становится. Ни строчки вперёд.
-
-Смешивать нельзя. Первое — инвентаризация оплаченного, второе — заметка на будущее. Как только второе начинает превращаться в работу, плагин против лишнего кода становится его генератором.
-
-## S6 — вердикт и запись
-
-Выдай: режим, кандидата, `score`-таблицу вариантов, две секции forward-look, и что именно делаем следующим шагом.
-
-**Запись решения — скилл `wheel-decision`.** Пишем только если выполнены все три условия:
-
-1. **необратимо** — передумать позже дорого;
-2. **неочевидно снаружи** — будущий читатель спросит «почему так?»;
-3. **результат реального выбора** — альтернативы были, выбрали по причинам.
-
-«Взяли Kestra и выкинули свой оркестратор» проходит все три. «Поставили prettier» — ни одного.
-
-Формат — один файл `~/.claude/wheel/decisions/<slug>.md` (или `./.claude/wheel/decisions/` для проектного решения; при конфликте побеждает проектное):
-
-    ---
-    name: <kebab-case-slug>
-    verdict: deploy | package | compose | extend-core | hard-fork | assemble
-    picked: <owner/repo или продукт>
-    maturity: A | B | C | D
-    date: YYYY-MM-DD
-    ---
-
-    ## Запрос
-    ## Кандидаты
-    <таблица: покрывает / что ещё умеет / лицензия / зрелость / стоимость входа>
-    ## Решили
-    ## Уже в коробке (включить?)
-    ## Придут позже (не строим)
-
-Строка в `INDEX.md` каталога: `- [<name>](<slug>.md) — <verdict>: <picked>`.
-
-Без явного подтверждения пользователя ничего не сохраняй; спроси, куда писать — глобально или в проект. Записанное решение делает следующую похожую задачу дешевле: оно находится на первом же шаге `S3`.
-
----
-
-## Предохранители
-
-**`hard-fork` и `migrate` не предлагаются без посчитанной цены.** Замена своего проекта чужим — самый дорогой совет, который можно дать, и он всегда выглядит выгодно: `gain` у готового продукта огромный, а `cost` миграции невиден, пока не измерен. Нужны цифры: объём своего кода, объём данных, число внешних интеграций. Нет цифр — нет вердикта.
-
-**Замена всегда показывается рядом с `extend`.** Никогда в одиночку. Человек должен видеть обе цены.
-
-**Своему коду больше года и он в проде** — замена уходит в «к рассмотрению», а не в рекомендацию.
-
-**Кандидат ни разу не открыт — вердикта нет.** README и звёзды не заменяют беглый просмотр репозитория финалистов.
-
-**Ноль кандидатов не означает `build`.** Означает, что грилинг продолжается.
-
-**Каталог дал ответ — поиск на рынке всё равно обязателен.** Локальные источники отстают, и вердикт, вынесенный только по ним, раз за разом смещён в сторону старого и универсального. Если в списке финалистов нет ни одного проекта моложе года, это не вывод о рынке, а признак того, что искали только в кэше.
-
-**Вердикт без оси пригодности недействителен.** У каждого финалиста должны быть названы специализация, цена исполнения и что именно он возвращает. «Зрелее и популярнее» — не ответ на вопрос, кто лучше делает работу.
-
-**Каталог старше суток — не источник, а подсказка.** Проверь дату файла: у `catalog.jsonl` рядом лежит `catalog.meta.json` с `built_at`. Каталог недельной давности отвечает на вопрос, каким рынок был неделю назад, и молчание в нём ничего не доказывает.
-
-**Прошлый вердикт не закрывает кандидата.** `tier` и `verdict` из личного каталога или реестра софта вынесены под другую задачу. Они меняют порядок проверки, но не список.
-
-**Возраст сам по себе не довод ни в одну сторону.** Старое отвергается фактом (архив, нет релизов, issue без ответов), новое отвергается фактом (нет вендора, нет пакетов, никто не пользуется). Формулировки «проверено временем» и «свежее значит лучше» без факта за спиной запрещены обе.
+For research details, SourceResult normalization, coverage accounting, source routing, and verification procedure, use `wheel-research`. For question construction and stability, use `wheel-grilling`. For Decision Records, use `wheel-decision`.

@@ -1,0 +1,32 @@
+{
+  "results": [
+    {
+      "source": "github",
+      "status": "ok",
+      "checked_at": "2026-08-30T00:00:00Z",
+      "evidence": [
+        {
+          "candidate": "https://github.com/Owner/Repo",
+          "signal_type": "code",
+          "claim": "Tests exist",
+          "url": "https://github.com/Owner/Repo/actions",
+          "observed_at": "2026-08-30T00:00:00Z"
+        },
+        {
+          "candidate": "git@github.com:OWNER/REPO.git",
+          "signal_type": "official",
+          "claim": "MIT License",
+          "url": "https://github.com/Owner/Repo/blob/main/LICENSE",
+          "observed_at": "2026-08-30T00:00:00Z"
+        },
+        {
+          "candidate": "owner/repo",
+          "signal_type": "code",
+          "claim": "  tests   exist ",
+          "url": "https://github.com/Owner/Repo/actions",
+          "observed_at": "2026-08-30T00:00:00Z"
+        }
+      ]
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 {
   "name": "wheel",
-  "version": "0.4.0",
-  "description": "The wheel already exists. Before writing any code, find existing solutions on the market, measure the gap, interview the user with candidate-derived questions, and pick an adoption mode. Building from scratch is not a valid outcome.",
+  "version": "0.6.0",
+  "description": "Live market-first discovery before implementation with an on-demand managed DonSeTch dynamic-page reader in a separate process; DonSeTch is not bundled.",
   "author": {
     "name": "kalpakprod"
   }

@@ -1,8 +1,8 @@
-# wheel: intent -> what to switch on now, and where to look on the market.
+# wheel: intent -> available host skills and live-market search routes.
 #
 # Deterministic layer. The skill greps `triggers` against the user's request,
-# takes `skills` (switch on immediately) and `search_terms` / `topics`
-# (feed into S3 market search). Nothing here is a recommendation of a product —
+# takes `skills` (switch on when available) and `search_terms` / `topics`
+# (feed into live research). Nothing here is a recommendation of a product —
 # maturity and gaps are measured per candidate at runtime.
 #
 # Adding an entry: only when an existing one does not cover the intent.
