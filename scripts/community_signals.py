@@ -102,8 +102,11 @@ def load_probe_terms(registry_path: Path | None = None) -> list[str]:
 
     try:
         import yaml
-    except ImportError as error:
-        raise RuntimeError("pyyaml is required to read probe terms registry") from error
+    except ImportError:
+        # The client contract is standard library only. pyyaml belongs to the CI
+        # catalog builder, so its absence degrades to the built-in English probes
+        # rather than taking down every community-signals call on a user machine.
+        return list(PROBE_TERMS[:MAX_PROBE_TERMS])
 
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
