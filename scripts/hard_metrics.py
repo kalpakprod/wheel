@@ -43,9 +43,13 @@ def _wheel_core() -> Any:
     return module
 
 
-DAY_SECONDS = getattr(_wheel_core(), "DAY_SECONDS")
-_gh_api = getattr(_wheel_core(), "_gh_api")
-_timestamp = getattr(_wheel_core(), "_timestamp")
+# Bind from one module object: the first getattr publishes _gh_api into this
+# module's globals, and when this file is __main__ a second _wheel_core() call
+# would match itself by that very attribute and return the wrong module.
+_core = _wheel_core()
+DAY_SECONDS = getattr(_core, "DAY_SECONDS")
+_gh_api = getattr(_core, "_gh_api")
+_timestamp = getattr(_core, "_timestamp")
 
 
 def bus_factor(contributors: list[dict]) -> dict:

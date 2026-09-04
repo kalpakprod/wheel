@@ -9,6 +9,29 @@ The release where the plugin's claims became measurements. Everything below that
 touches the network was run against the live APIs before it was written down;
 where something could not be verified, this file says so.
 
+### Fixed
+
+- **Reddit OAuth picked the wrong grant for most apps.** The token request hard
+  coded `installed_client`, which only a public installed app accepts; a script
+  or web app carries a secret, is a confidential client and answers to
+  `client_credentials`. Reddit rejects the mismatch with a bare 401, so the grant
+  is now selected from whether `WHEEL_REDDIT_CLIENT_SECRET` is set. Verified
+  against live Reddit: a deliberate wrong-credential probe returns the 401 the
+  new `--check-reddit` command reports, not a silent empty result.
+- **`--check-reddit`.** `scripts/community_signals.py --check-reddit` mints a
+  token and prints `ok`, `unconfigured` or `error` with the grant it attempted,
+  exiting non-zero on anything but `ok`. Credentials are never printed, and a
+  test asserts the failure text carries neither the id nor the secret.
+- **`WHEEL_REDDIT_USER_AGENT`.** Reddit throttles by agent string and every
+  install previously shared one hardcoded value. The default now carries the
+  version read from the plugin manifest, and an operator can name their own.
+- **The helper scripts could not run as scripts.** `community_signals.py` and
+  `hard_metrics.py` crashed with `AttributeError` under
+  `python scripts/<name>.py`: the first `getattr` published `_gh_api` into the
+  module's own globals, and the next `_wheel_core()` call matched the running
+  module by that attribute and returned itself. The core module is now resolved
+  once and bound from that object. A test runs all three helpers as files.
+
 ### Added
 
 - **Daily catalog, built by CI.** `.github/workflows/sync-catalog.yml` runs

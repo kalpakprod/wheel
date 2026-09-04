@@ -45,7 +45,8 @@ def _wheel_core() -> Any:
     return module
 
 
-_gh_api = getattr(_wheel_core(), "_gh_api")
+_core = _wheel_core()
+_gh_api = getattr(_core, "_gh_api")
 
 
 SUPPORTED_MANIFESTS: dict[str, str] = {
