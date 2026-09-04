@@ -1,6 +1,6 @@
 {
   "name": "wheel",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Live market-first discovery before implementation with an on-demand managed DonSeTch dynamic-page reader in a separate process; DonSeTch is not bundled.",
   "author": {
     "name": "kalpakprod"

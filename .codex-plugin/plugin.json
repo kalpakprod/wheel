@@ -1,6 +1,6 @@
 {
   "name": "wheel",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Live market-first discovery before implementation with an on-demand managed DonSeTch dynamic-page reader in a separate process; DonSeTch is not bundled.",
   "author": {
     "name": "kalpakprod",
@@ -9,11 +9,7 @@
   "homepage": "https://github.com/kalpakprod/wheel",
   "repository": "https://github.com/kalpakprod/wheel",
   "license": "MIT",
-  "keywords": [
-    "market-research",
-    "software-discovery",
-    "agent-skills"
-  ],
+  "keywords": ["market-research", "software-discovery", "agent-skills"],
   "skills": "./skills/",
   "interface": {
     "displayName": "Wheel",
@@ -21,10 +17,7 @@
     "longDescription": "Runs live quick discovery, candidate-derived questioning, deep verification, six adoption modes (deploy, package, compose, extend-core, hard-fork, assemble), base-and-donor selection, and an on-demand managed DonSeTch dynamic-page reader in a separate process. DonSeTch is not bundled.",
     "developerName": "kalpakprod",
     "category": "Developer Tools",
-    "capabilities": [
-      "Read",
-      "Interactive"
-    ],
+    "capabilities": ["Read", "Interactive"],
     "websiteURL": "https://github.com/kalpakprod/wheel",
     "defaultPrompt": [
       "Find the best existing foundation for this product idea."
