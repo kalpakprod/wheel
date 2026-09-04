@@ -105,16 +105,39 @@ class TestCommunitySignals(unittest.TestCase):
         self.assertEqual(result["matches"], [])
         self.assertIn("500", result["reason"])
 
-    @unittest.mock.patch("scripts.community_signals._search_reddit_donsetch")
-    def test_search_reddit_blocked(self, mock_donsetch):
-        mock_donsetch.side_effect = RuntimeError("HTTP 403 Forbidden")
+    @unittest.mock.patch("scripts.community_signals._get_reddit_oauth_token")
+    @unittest.mock.patch("scripts.community_signals._search_reddit_oauth")
+    def test_search_reddit_blocked(self, mock_search, mock_token):
+        mock_token.return_value = "t0ken"
+        mock_search.side_effect = RuntimeError("HTTP 403 Forbidden")
         result = search_reddit("ToolX")
         self.assertEqual(result["status"], "blocked")
         self.assertEqual(result["matches"], [])
         self.assertIn("403", result["reason"])
 
-    @unittest.mock.patch("scripts.community_signals._search_reddit_donsetch")
-    def test_search_reddit_success_and_timestamp_parsing(self, mock_donsetch):
+    @unittest.mock.patch("scripts.community_signals._get_reddit_oauth_token")
+    def test_unconfigured_reddit_is_blocked_not_read_another_way(self, mock_token):
+        mock_token.return_value = None
+        result = search_reddit("ToolX")
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["matches"], [])
+        self.assertIn("WHEEL_REDDIT_CLIENT_ID", result["reason"])
+        self.assertEqual(result["retention"], "none")
+
+    @unittest.mock.patch("scripts.community_signals._get_reddit_oauth_token")
+    def test_rate_budget_refusal_is_reported_as_blocked(self, mock_token):
+        mock_token.side_effect = community_signals.RedditComplianceError(
+            "Reddit rate budget exhausted: 2 requests left, 30s to window reset"
+        )
+        result = search_reddit("ToolX")
+        self.assertEqual(result["status"], "blocked")
+        self.assertIn("rate budget", result["reason"])
+
+    @unittest.mock.patch("scripts.community_signals._get_reddit_oauth_token")
+    @unittest.mock.patch("scripts.community_signals._search_reddit_oauth")
+    def test_search_reddit_success_and_timestamp_parsing(self, mock_search, mock_token):
+        mock_token.return_value = "t0ken"
+        mock_donsetch = mock_search
         reddit_payload = {
             "data": {
                 "children": [
@@ -410,73 +433,17 @@ class TestCommunitySignals(unittest.TestCase):
                 self.assertEqual(res2["status"], "ok")
                 self.assertEqual(mock_http.call_count, 1)
 
-    def test_reddit_credential_absent_fallback(self):
-        _REDDIT_TOKEN_CACHE.clear()
-        with unittest.mock.patch.dict(os.environ, {}, clear=True):
-            with unittest.mock.patch(
-                "scripts.community_signals._search_reddit_donsetch"
-            ) as mock_donsetch:
-                mock_donsetch.return_value = {
-                    "data": {
-                        "children": [
-                            {
-                                "data": {
-                                    "title": "Postmortem ToolZ",
-                                    "permalink": "/r/dev/comments/789",
-                                    "score": 4,
-                                    "created_utc": 1681000000,
-                                }
-                            }
-                        ]
-                    }
-                }
-                res = search_reddit("ToolZ")
-                self.assertEqual(res["status"], "ok")
-                self.assertEqual(len(res["matches"]), 1)
-                self.assertEqual(res["matches"][0]["title"], "Postmortem ToolZ")
-                mock_donsetch.assert_called_once()
-
-    def test_reddit_credential_absent_fallback_failure(self):
-        _REDDIT_TOKEN_CACHE.clear()
-        with unittest.mock.patch.dict(os.environ, {}, clear=True):
-            with unittest.mock.patch(
-                "scripts.community_signals._search_reddit_donsetch"
-            ) as mock_donsetch:
-                mock_donsetch.side_effect = RuntimeError(
-                    "donsetch unavailable: browser crashed"
-                )
-                res = search_reddit("ToolZ")
-                self.assertEqual(res["status"], "unavailable")
-                self.assertIn("browser crashed", res["reason"])
-                self.assertEqual(res["matches"], [])
-
-    def test_registry_driven_term_selection(self):
-        terms = load_probe_terms()
-        self.assertIsInstance(terms, list)
-        self.assertIn("postmortem", terms)
-        self.assertIn("migrated away", terms)
-        self.assertLessEqual(len(terms), 8)
-
-    def test_wheel_probe_langs_honoured(self):
-        with unittest.mock.patch.dict(os.environ, {"WHEEL_PROBE_LANGS": "ru,es"}):
-            terms = load_probe_terms()
-            self.assertIn("postmortem", terms)
-            self.assertIn("ушёл с", terms)
-            self.assertLessEqual(len(terms), 8)
-
-    def test_probe_cap_enforced(self):
-        with unittest.mock.patch.dict(
-            os.environ, {"WHEEL_PROBE_LANGS": "ru,es,pt,de,fr,zh,ja"}
+    def test_matches_are_marked_as_not_retained(self):
+        payload = {"data": {"children": []}}
+        with unittest.mock.patch.object(
+            community_signals, "_get_reddit_oauth_token", return_value="t0ken"
         ):
-            terms = load_probe_terms()
-            self.assertEqual(len(terms), 8)
-
-    def test_registry_missing_fallback(self):
-        from pathlib import Path
-
-        missing_path = Path("this_file_does_not_exist_xyz.yaml")
-        terms = load_probe_terms(registry_path=missing_path)
-        self.assertEqual(terms, list(PROBE_TERMS[:8]))
+            with unittest.mock.patch.object(
+                community_signals, "_search_reddit_oauth", return_value=payload
+            ):
+                result = search_reddit("ToolX")
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["retention"], "none")
 
 
 class RedditAuthTests(unittest.TestCase):
@@ -487,6 +454,11 @@ class RedditAuthTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         community_signals._REDDIT_TOKEN_CACHE.pop("access_token", None)
+
+    def _named(self, **extra: str) -> unittest.mock._patch_dict:
+        env = {"WHEEL_REDDIT_USER_AGENT": "", "WHEEL_REDDIT_USERNAME": "wheelbot"}
+        env.update(extra)
+        return unittest.mock.patch.dict(os.environ, env, clear=False)
 
     def test_secret_selects_client_credentials(self) -> None:
         payload = community_signals._reddit_grant_payload("s3cret")
@@ -525,17 +497,56 @@ class RedditAuthTests(unittest.TestCase):
         self.assertNotIn("secret-xyz", str(seen["data"]))
         self.assertTrue(seen["headers"]["Authorization"].startswith("Basic "))
 
-    def test_user_agent_is_overridable_and_carries_the_shipped_version(self) -> None:
+    def test_user_agent_is_overridable(self) -> None:
         with unittest.mock.patch.dict(
-            os.environ, {"WHEEL_REDDIT_USER_AGENT": "acme/9 (+contact)"}, clear=False
+            os.environ, {"WHEEL_REDDIT_USER_AGENT": "acme/9 (by /u/acme)"}, clear=False
         ):
-            self.assertEqual(community_signals.reddit_user_agent(), "acme/9 (+contact)")
-        with unittest.mock.patch.dict(
-            os.environ, {"WHEEL_REDDIT_USER_AGENT": ""}, clear=False
-        ):
+            self.assertEqual(
+                community_signals.reddit_user_agent(), "acme/9 (by /u/acme)"
+            )
+
+    def test_user_agent_follows_the_format_reddit_documents(self) -> None:
+        env = {"WHEEL_REDDIT_USER_AGENT": "", "WHEEL_REDDIT_USERNAME": "u/maxim_dev"}
+        with unittest.mock.patch.dict(os.environ, env, clear=False):
             agent = community_signals.reddit_user_agent()
-        self.assertTrue(agent.startswith("wheel/"))
-        self.assertNotIn("wheel/0.0.0", agent)
+        self.assertTrue(agent.startswith("python:com.kalpakprod.wheel:v"))
+        self.assertTrue(agent.endswith("(by /u/maxim_dev)"))
+        self.assertNotIn(":v0.0.0", agent)
+
+    def test_an_unnamed_install_is_refused_rather_than_sent_anonymously(self) -> None:
+        env = {"WHEEL_REDDIT_USER_AGENT": "", "WHEEL_REDDIT_USERNAME": ""}
+        with unittest.mock.patch.dict(os.environ, env, clear=False):
+            with self.assertRaises(community_signals.RedditComplianceError):
+                community_signals.reddit_user_agent()
+
+    def test_a_bad_username_is_refused(self) -> None:
+        env = {"WHEEL_REDDIT_USER_AGENT": "", "WHEEL_REDDIT_USERNAME": "no spaces!"}
+        with unittest.mock.patch.dict(os.environ, env, clear=False):
+            with self.assertRaises(community_signals.RedditComplianceError):
+                community_signals.reddit_user_agent()
+
+    def test_rate_gate_refuses_once_the_published_budget_is_spent(self) -> None:
+        community_signals._REDDIT_RATE_STATE.clear()
+        try:
+            community_signals._record_reddit_rate(
+                {"x-ratelimit-remaining": "2", "x-ratelimit-reset": "45"}
+            )
+            with self.assertRaises(community_signals.RedditComplianceError) as caught:
+                community_signals._reddit_rate_gate()
+            self.assertIn("rate budget", str(caught.exception))
+
+            community_signals._record_reddit_rate(
+                {"x-ratelimit-remaining": "80", "x-ratelimit-reset": "45"}
+            )
+            community_signals._reddit_rate_gate()
+        finally:
+            community_signals._REDDIT_RATE_STATE.clear()
+
+    def test_rate_state_ignores_a_response_without_the_headers(self) -> None:
+        community_signals._REDDIT_RATE_STATE.clear()
+        community_signals._record_reddit_rate({"content-type": "application/json"})
+        self.assertEqual(community_signals._REDDIT_RATE_STATE, {})
+        community_signals._reddit_rate_gate()
 
     def test_check_reports_unconfigured_without_touching_the_network(self) -> None:
         def explode(*args, **kwargs):
@@ -559,6 +570,8 @@ class RedditAuthTests(unittest.TestCase):
         env = {
             "WHEEL_REDDIT_CLIENT_ID": "id-abc",
             "WHEEL_REDDIT_CLIENT_SECRET": "secret-xyz",
+            "WHEEL_REDDIT_USER_AGENT": "",
+            "WHEEL_REDDIT_USERNAME": "wheelbot",
         }
         with unittest.mock.patch.dict(os.environ, env, clear=False):
             with unittest.mock.patch.object(
@@ -576,7 +589,12 @@ class RedditAuthTests(unittest.TestCase):
         def fake_request(url, *, allowed_hosts, headers=None, data=None, **kwargs):
             return 200, b'{"access_token": "t0ken"}', {}
 
-        env = {"WHEEL_REDDIT_CLIENT_ID": "id-abc", "WHEEL_REDDIT_CLIENT_SECRET": ""}
+        env = {
+            "WHEEL_REDDIT_CLIENT_ID": "id-abc",
+            "WHEEL_REDDIT_CLIENT_SECRET": "",
+            "WHEEL_REDDIT_USER_AGENT": "",
+            "WHEEL_REDDIT_USERNAME": "wheelbot",
+        }
         with unittest.mock.patch.dict(os.environ, env, clear=False):
             with unittest.mock.patch.object(
                 community_signals, "_reddit_http_request", fake_request
@@ -586,6 +604,19 @@ class RedditAuthTests(unittest.TestCase):
         self.assertEqual(report["status"], "ok")
         self.assertEqual(report["grant"], community_signals.REDDIT_INSTALLED_GRANT)
         self.assertEqual(report["reason"], "")
+        self.assertIn("(by /u/wheelbot)", report["user_agent"])
+
+    def test_check_refuses_an_install_that_cannot_identify_itself(self) -> None:
+        env = {
+            "WHEEL_REDDIT_CLIENT_ID": "id-abc",
+            "WHEEL_REDDIT_CLIENT_SECRET": "",
+            "WHEEL_REDDIT_USER_AGENT": "",
+            "WHEEL_REDDIT_USERNAME": "",
+        }
+        with unittest.mock.patch.dict(os.environ, env, clear=False):
+            report = community_signals.check_reddit_credentials()
+        self.assertEqual(report["status"], "unconfigured")
+        self.assertIn("WHEEL_REDDIT_USERNAME", report["reason"])
 
 
 class ScriptEntryPointTests(unittest.TestCase):

@@ -15,6 +15,7 @@ import argparse
 from datetime import datetime, timezone
 import json
 import os
+import re
 import time
 import sys
 import urllib.error
@@ -75,7 +76,6 @@ NEGATIVE_TERMS: tuple[str, ...] = (
 HN_ALLOWED_HOSTS: frozenset[str] = frozenset({"hn.algolia.com"})
 SEARCH_PROBE_PAUSE_SECONDS = 2.5
 STACKEXCHANGE_ALLOWED_HOSTS: frozenset[str] = frozenset({"api.stackexchange.com"})
-REDDIT_ALLOWED_HOSTS: frozenset[str] = frozenset({"www.reddit.com"})
 REDDIT_TOKEN_HOSTS: frozenset[str] = frozenset({"www.reddit.com"})
 REDDIT_OAUTH_HOSTS: frozenset[str] = frozenset({"oauth.reddit.com"})
 
@@ -97,6 +97,11 @@ REDDIT_INSTALLED_GRANT = "https://oauth.reddit.com/grants/installed_client"
 REDDIT_CLIENT_ID_ENV = "WHEEL_REDDIT_CLIENT_ID"
 REDDIT_CLIENT_SECRET_ENV = "WHEEL_REDDIT_CLIENT_SECRET"
 REDDIT_USER_AGENT_ENV = "WHEEL_REDDIT_USER_AGENT"
+REDDIT_USERNAME_ENV = "WHEEL_REDDIT_USERNAME"
+REDDIT_APP_ID = "com.kalpakprod.wheel"
+REDDIT_USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{3,20}$")
+REDDIT_RATE_RESERVE = 5
+_REDDIT_RATE_STATE: dict[str, float] = {}
 _PLUGIN_MANIFEST = (
     Path(__file__).resolve().parents[1] / ".claude-plugin" / "plugin.json"
 )
@@ -113,12 +118,64 @@ def _plugin_version() -> str:
     return version if isinstance(version, str) and version else "0.0.0"
 
 
+class RedditComplianceError(RuntimeError):
+    """Raised when a request would break Reddit's Data API rules if it were sent."""
+
+
 def reddit_user_agent() -> str:
-    """Reddit throttles shared agents, so an operator may name their own install."""
+    """Build the agent string Reddit's Data API Wiki mandates, or refuse to call.
+
+    Required shape: ``<platform>:<app ID>:<version> (by /u/<username>)``. Reddit
+    states it throttles or blocks unidentified clients and that a generic agent is
+    limited on purpose, so an install without a contact username is not allowed to
+    reach the API at all rather than being throttled as an anonymous stranger.
+    """
     configured = os.environ.get(REDDIT_USER_AGENT_ENV, "").strip()
     if configured:
         return configured
-    return f"wheel/{_plugin_version()} (+https://github.com/kalpakprod/wheel)"
+    username = os.environ.get(REDDIT_USERNAME_ENV, "").strip().lstrip("/")
+    if username.lower().startswith("u/"):
+        username = username[2:]
+    if not REDDIT_USERNAME_PATTERN.match(username):
+        raise RedditComplianceError(
+            f"Reddit requires a contact username in the User-Agent: set {REDDIT_USERNAME_ENV} "
+            f"to your Reddit handle, or set {REDDIT_USER_AGENT_ENV} to a full compliant string"
+        )
+    return f"python:{REDDIT_APP_ID}:v{_plugin_version()} (by /u/{username})"
+
+
+def _reddit_rate_gate() -> None:
+    """Stop before the free-tier budget runs out instead of discovering it with a 429.
+
+    Reddit publishes 100 queries per minute per OAuth client id and asks callers to
+    watch the x-ratelimit headers. The last response's remaining count is kept, and
+    once it drops into the reserve the next call is refused until the window resets.
+    """
+    remaining = _REDDIT_RATE_STATE.get("remaining")
+    reset_at = _REDDIT_RATE_STATE.get("reset_at", 0.0)
+    if remaining is None:
+        return
+    if remaining > REDDIT_RATE_RESERVE:
+        return
+    wait = reset_at - time.time()
+    if wait <= 0:
+        _REDDIT_RATE_STATE.clear()
+        return
+    raise RedditComplianceError(
+        f"Reddit rate budget exhausted: {int(remaining)} requests left, "
+        f"{int(wait)}s to window reset"
+    )
+
+
+def _record_reddit_rate(headers: dict[str, str]) -> None:
+    """Remember the published budget so the next call can honour it."""
+    try:
+        remaining = float(headers["x-ratelimit-remaining"])
+        reset = float(headers["x-ratelimit-reset"])
+    except (KeyError, TypeError, ValueError):
+        return
+    _REDDIT_RATE_STATE["remaining"] = remaining
+    _REDDIT_RATE_STATE["reset_at"] = time.time() + reset
 
 
 def _reddit_grant_payload(client_secret: str) -> dict[str, str]:
@@ -212,10 +269,13 @@ def _reddit_http_request(
     if host not in allowed_hosts:
         raise ValueError(f"host {host!r} not in allowed hosts: {allowed_hosts}")
 
+    agent = reddit_user_agent()
+    _reddit_rate_gate()
+
     req = urllib.request.Request(
         url, data=data, method="POST" if data is not None else "GET"
     )
-    req.add_header("User-Agent", reddit_user_agent())
+    req.add_header("User-Agent", agent)
     if headers:
         for k, v in headers.items():
             req.add_header(k, v)
@@ -244,6 +304,7 @@ def _reddit_http_request(
         if len(body) > max_bytes:
             raise ValueError(f"response body exceeded {max_bytes} bytes")
         resp_headers = {k.lower(): v for k, v in resp.headers.items()}
+        _record_reddit_rate(resp_headers)
         return resp.status, body, resp_headers
 
 
@@ -435,6 +496,15 @@ def check_reddit_credentials() -> dict[str, Any]:
         }
     client_secret = os.environ.get(REDDIT_CLIENT_SECRET_ENV, "").strip()
     grant = _reddit_grant_payload(client_secret)["grant_type"]
+    try:
+        agent = reddit_user_agent()
+    except RedditComplianceError as exc:
+        return {
+            "source": "reddit",
+            "status": "unconfigured",
+            "grant": grant,
+            "reason": str(exc),
+        }
     _REDDIT_TOKEN_CACHE.pop("access_token", None)
     try:
         token = _get_reddit_oauth_token()
@@ -452,7 +522,13 @@ def check_reddit_credentials() -> dict[str, Any]:
             "grant": grant,
             "reason": f"{REDDIT_CLIENT_ID_ENV} is not set",
         }
-    return {"source": "reddit", "status": "ok", "grant": grant, "reason": ""}
+    return {
+        "source": "reddit",
+        "status": "ok",
+        "grant": grant,
+        "user_agent": agent,
+        "reason": "",
+    }
 
 
 def _search_reddit_oauth(query: str, limit: int, token: str) -> dict:
@@ -479,97 +555,65 @@ def _search_reddit_oauth(query: str, limit: int, token: str) -> dict:
     return json.loads(raw_bytes.decode("utf-8"))
 
 
-def _search_reddit_donsetch(query: str, limit: int) -> dict:
-    """Fallback reader using wheel's donsetch dynamic-page reader."""
-    core = _wheel_core()
-    donsetch = getattr(core, "donsetch_fetch", None)
-    if not callable(donsetch):
-        raise RuntimeError("donsetch reader not available in core")
-
-    params = urllib.parse.urlencode(
-        {
-            "q": query,
-            "sort": "relevance",
-            "limit": str(limit),
-        }
-    )
-    public_url = f"https://www.reddit.com/search.json?{params}"
-    res = donsetch(public_url, allowed_hosts=REDDIT_ALLOWED_HOSTS)
-    if isinstance(res, dict):
-        status_field = res.get("status")
-        if status_field in ("blocked", "unavailable", "error"):
-            reason = (
-                res.get("detail")
-                or res.get("reason")
-                or res.get("error")
-                or f"donsetch fetch returned {status_field}"
-            )
-            raise RuntimeError(reason)
-        # In donsetch_fetch, on success data["content"] has the text/content
-        content = res.get("content")
-        if not content and isinstance(res.get("data"), dict):
-            content = res["data"].get("content")
-        if not content:
-            content = res.get("body")
-        if isinstance(content, bytes):
-            return json.loads(content.decode("utf-8"))
-        elif isinstance(content, str) and content.strip():
-            return json.loads(content)
-        raise RuntimeError("donsetch returned no readable payload body")
-    if hasattr(res, "status_code"):
-        status_code = getattr(res, "status_code", 200)
-        if status_code != 200:
-            raise RuntimeError(f"HTTP {status_code}")
-        body = getattr(res, "body", b"")
-        if isinstance(body, bytes):
-            return json.loads(body.decode("utf-8"))
-        elif isinstance(body, str):
-            return json.loads(body)
-    raise RuntimeError(f"donsetch returned unexpected response type: {type(res)}")
+def _reddit_blocked(query: str, reason: str) -> dict:
+    """Reddit is either read through OAuth or not read at all."""
+    return {
+        "source": "reddit",
+        "status": "blocked",
+        "query": query,
+        "reason": reason,
+        "retention": "none",
+        "matches": [],
+    }
 
 
 def search_reddit(query: str, limit: int = 25) -> dict:
-    """Search Reddit public posts for regret/migration discussions.
+    """Search Reddit for regret and migration discussions through the Data API.
 
-    Attempts app-only OAuth first when WHEEL_REDDIT_CLIENT_ID is set.
-    Falls back to donsetch managed reader on unconfigured or failed OAuth.
-    Returns status 'blocked' or 'unavailable' on failures, never fabricated results.
+    OAuth is the only route. Reddit's Responsible Builder Policy forbids masking how
+    its data is reached, and its API wiki says unauthenticated traffic is blocked
+    outright, so an unconfigured install reports `blocked` instead of reaching the
+    same content through a managed page reader.
+
+    Matches are returned for the caller to read now. They carry `retention: none`:
+    Reddit requires deleted content to be removed from any copy held, so nothing
+    from this source is written to disk by the decision path.
     """
     bounded_limit = min(limit, MAX_ITEMS_PER_SOURCE)
 
-    data = None
-    last_error: Exception | None = None
-
-    oauth_token = None
     try:
         oauth_token = _get_reddit_oauth_token()
+    except RedditComplianceError as exc:
+        return _reddit_blocked(query, str(exc))
     except Exception as exc:
-        last_error = exc
+        return _reddit_blocked(query, str(exc))
 
-    if oauth_token:
-        try:
-            data = _search_reddit_oauth(query, bounded_limit, oauth_token)
-        except Exception as exc:
-            last_error = exc
+    if not oauth_token:
+        return _reddit_blocked(
+            query,
+            f"{REDDIT_CLIENT_ID_ENV} is not set: register an app at "
+            "https://www.reddit.com/prefs/apps and configure app-only OAuth",
+        )
 
-    if data is None:
-        try:
-            data = _search_reddit_donsetch(query, bounded_limit)
-        except Exception as exc:
-            last_error = exc
-            exc_str = str(exc)
-            status_val = (
-                "blocked"
-                if ("403" in exc_str or "blocked" in exc_str.lower())
-                else "unavailable"
-            )
-            return {
-                "source": "reddit",
-                "status": status_val,
-                "query": query,
-                "reason": exc_str,
-                "matches": [],
-            }
+    try:
+        data = _search_reddit_oauth(query, bounded_limit, oauth_token)
+    except RedditComplianceError as exc:
+        return _reddit_blocked(query, str(exc))
+    except Exception as exc:
+        exc_str = str(exc)
+        status_val = (
+            "blocked"
+            if ("403" in exc_str or "429" in exc_str or "blocked" in exc_str.lower())
+            else "unavailable"
+        )
+        return {
+            "source": "reddit",
+            "status": status_val,
+            "query": query,
+            "reason": exc_str,
+            "retention": "none",
+            "matches": [],
+        }
 
     children = (
         (data.get("data") or {}).get("children") if isinstance(data, dict) else None
@@ -580,6 +624,7 @@ def search_reddit(query: str, limit: int = 25) -> dict:
             "status": "error",
             "query": query,
             "reason": "Missing or non-list children in payload",
+            "retention": "none",
             "matches": [],
         }
 
@@ -616,6 +661,7 @@ def search_reddit(query: str, limit: int = 25) -> dict:
         "source": "reddit",
         "status": "ok",
         "query": query,
+        "retention": "none",
         "matches": matches,
     }
 
