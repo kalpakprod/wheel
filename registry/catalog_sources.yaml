@@ -1,0 +1,126 @@
+# wheel: inputs for the catalog producer (scripts/build_catalog.py).
+#
+# This file is PARSED BY CODE, not by the model. Every entry here turns into
+# real GitHub API calls in the sync-catalog workflow. Nothing is scraped from
+# a rendered web page: `trend` entries are computed from the GitHub Search API,
+# which is a trend PROXY built from hard facts (stars, push date, creation
+# date), not a mirror of Trendshift or GitTrend.
+#
+# Adding an entry: keep queries narrow enough to stay inside the Search API
+# budget (30 requests/minute, 1000 results per query).
+
+schema_version: 1
+
+# What one run collects and what it publishes.
+#
+# The catalog is a movement index, not a mirror of GitHub: a live query already
+# answers "what exists", and only yesterday's snapshot answers "what is moving".
+# So the published set is deliberately small and split into three tiers by
+# select_index() in scripts/build_catalog.py:
+#
+#   curated_records   ready-made references from the awesome lists, by stars
+#   gem_records       young licensed repositories under 500 stars; every other
+#                     tier ranks by stars, so without this one a gem never wins
+#   movement_records  entries with measured stars_per_day, by that rate
+#   the remainder     fresh intake by stars, so tomorrow they have a baseline
+#
+# curated + movement must stay below total_records, or intake starves and the
+# index ossifies around whatever it published first.
+limits:
+  per_query: 50
+  awesome_repos_per_list: 60
+  total_records: 400
+  curated_records: 120
+  gem_records: 60
+  movement_records: 180
+
+# Trend proxies: recently created or recently active repositories, ranked by
+# stars. `window_days` bounds `created:>` or `pushed:>`.
+trends:
+  - id: rising-agent-tooling
+    query: "topic:ai-agents stars:>50"
+    field: created
+    window_days: 365
+    kind: repository
+    capability: llm-agents
+
+  - id: rising-mcp-servers
+    query: "topic:mcp stars:>10"
+    field: created
+    window_days: 365
+    kind: mcp-server
+    capability: mcp-servers
+
+  - id: active-mcp-servers
+    query: "topic:model-context-protocol stars:>25"
+    field: pushed
+    window_days: 90
+    kind: mcp-server
+    capability: mcp-servers
+
+  - id: rising-agent-skills
+    query: "topic:agent-skills stars:>5"
+    field: pushed
+    window_days: 180
+    kind: skill
+    capability: agent-skills
+
+  - id: active-design-systems
+    query: "topic:design-system stars:>200"
+    field: pushed
+    window_days: 90
+    kind: design-system
+    capability: design-systems
+
+  - id: active-component-libraries
+    query: "topic:component-library stars:>200"
+    field: pushed
+    window_days: 90
+    kind: design-system
+    capability: design-systems
+
+  - id: rising-developer-tools
+    query: "topic:developer-tools stars:>100"
+    field: created
+    window_days: 365
+    kind: repository
+    capability: developer-tools
+
+# Curated lists. The producer reads each README, extracts every github.com
+# repository link, and enriches the ones it has budget for.
+awesome_lists:
+  - id: awesome-system-design-resources
+    repo: ashishps1/awesome-system-design-resources
+    kind: reference
+    capability: system-design-resources
+    # This list links to markdown inside its own repository, so link extraction
+    # returns nothing. These are the references it exists to point at, named
+    # outright and verified against the API before being written here.
+    repos:
+      - donnemartin/system-design-primer
+      - karanpratapsingh/system-design
+      - ByteByteGoHq/system-design-101
+      - binhnguyennus/awesome-scalability
+      - ashishps1/awesome-low-level-design
+      - realworld-apps/realworld
+      - goldbergyoni/nodebestpractices
+
+  - id: awesome-mcp-servers
+    repo: punkpeye/awesome-mcp-servers
+    kind: mcp-server
+    capability: mcp-servers
+
+  - id: awesome-claude-code
+    repo: hesreallyhim/awesome-claude-code
+    kind: plugin
+    capability: plugins-extensions
+
+  - id: awesome-selfhosted
+    repo: awesome-selfhosted/awesome-selfhosted
+    kind: service
+    capability: devops-deploy
+
+  - id: public-apis
+    repo: public-apis/public-apis
+    kind: service
+    capability: api-integration

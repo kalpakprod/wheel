@@ -35,7 +35,19 @@
   deep: true
   adapter: agent-reach:dev
   browser_capability: opencli
-  operations: [search, repo, forks, issues, discussions, releases, code, tests, license, contributors]
+  operations:
+    [
+      search,
+      repo,
+      forks,
+      issues,
+      discussions,
+      releases,
+      code,
+      tests,
+      license,
+      contributors,
+    ]
 
 - id: gittrend
   class: trend
@@ -66,7 +78,8 @@
   reader: donsetch:fetch
   runtime_adapter: wheel:read-url
   reader_mode: conditional
-  reader_conditions: [dynamic-page, js-shell, bot-wall, incomplete-default-reader]
+  reader_conditions:
+    [dynamic-page, js-shell, bot-wall, incomplete-default-reader]
   browser_capability: opencli
   browser_session: existing-authenticated
   operations: [search, read, official]
@@ -80,10 +93,12 @@
   reader: donsetch:fetch
   runtime_adapter: wheel:read-url
   reader_mode: conditional
-  reader_conditions: [dynamic-page, js-shell, bot-wall, incomplete-default-reader]
+  reader_conditions:
+    [dynamic-page, js-shell, bot-wall, incomplete-default-reader]
   browser_capability: opencli
   browser_session: existing-authenticated
-  operations: [official, documentation, installation, changelog, security, license]
+  operations:
+    [official, documentation, installation, changelog, security, license]
 
 - id: last30days
   class: community
@@ -145,3 +160,64 @@
   deep: true
   adapter: agent-reach:dev
   operations: [search, discussion]
+
+- id: catalog-sync
+  class: trend
+  capability: wheel:sync-catalog
+  quick: true
+  deep: true
+  adapter: wheel:sync-catalog
+  operations: [catalog-jsonl, offline-cache]
+
+- id: awesome-catalogs
+  class: repository
+  capability: agent-reach
+  quick: true
+  deep: true
+  adapter: agent-reach:dev
+  operations: [awesome-lists, system-design-resources, curated-catalogs]
+
+- id: regret-mining
+  class: community
+  capability: agent-reach
+  quick: false
+  deep: true
+  adapter: agent-reach:dev
+  operations: [postmortem, migration, issues, memory-leak, regret-signals]
+
+- id: community-signals
+  class: community
+  capability: wheel:community-signals
+  quick: false
+  deep: true
+  adapter: wheel:community-signals
+  operations:
+    [
+      search_hackernews,
+      search_reddit,
+      search_github_issues,
+      collect_regret_signals,
+    ]
+
+- id: dependency-debt
+  class: repository
+  capability: wheel:dependency-debt
+  quick: false
+  deep: true
+  adapter: wheel:dependency-debt
+  operations:
+    [
+      fetch_sbom,
+      count_from_sbom,
+      fetch_direct_manifests,
+      analyze_dependency_debt,
+    ]
+
+- id: hard-metrics
+  class: repository
+  capability: wheel:hard-metrics
+  quick: false
+  deep: true
+  adapter: wheel:hard-metrics
+  operations:
+    [bus_factor, commit_cadence, release_cadence, collect_hard_metrics]

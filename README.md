@@ -7,8 +7,12 @@
 </p>
 
 <p align="center">
-  <strong>Live software discovery before implementation.</strong><br>
+  <strong>Wheel 0.7.0 — live software discovery before implementation.</strong><br>
   Quick research · one candidate-changing question · deep verification · one adoption verdict
+</p>
+
+<p align="center">
+  Python 3.11+, standard library only. MIT.
 </p>
 
 # Wheel
@@ -18,9 +22,9 @@
 - Describe what you want to build, replace, or extend. Wheel searches for a mature existing foundation before an implementation plan exists.
 - Invoke the single user-facing entry point:
 
-  ~~~text
+  ```text
   /wheel a self-hosted task tracker that AI agents can maintain
-  ~~~
+  ```
 
 - Wheel first returns solution Families and one question whose answer changes the surviving Candidates.
 - New code is considered only after a verified Core still has a proven Gap.
@@ -47,6 +51,7 @@
 - `hard-fork`: modify the Core and accept permanent ownership only after migration cost is measured.
 - `assemble`: connect verified parts when no direct Core fits; it is not permission for an unverified rewrite.
 - The Verdict names the Core, upstream or Fork, tested version, Donors, license boundary, integration method, rejected Alternatives, and deferred work.
+- An expert Decision Record also carries `evidence_gaps`: a list of `{source, reason}` objects naming every source that returned nothing, was blocked, or was unavailable. An empty list is permitted and is a claim that every source answered.
 
 ## Live research
 
@@ -54,10 +59,45 @@
 - Quick research builds three to six solution Families before the first question.
 - Deep research verifies four to eight Candidates and resolves their upstream, Forks, Plugins, Sidecars, and Donors.
 - Repository Evidence comes from GitHub metadata, source, tests, releases, issues, discussions, contributors, and licenses.
-- Trend Evidence comes from GitTrend, Trendshift, and current repository activity.
-- Community Evidence can include Reddit, Telegram, Hacker News, X, YouTube, V2EX, and last30days when available.
+- Trend Evidence is computed, not scraped from anyone's ranking: `created:` and `pushed:` windows over the GitHub API, plus star movement measured against yesterday's published catalog.
+- Community Evidence is gathered by `community-signals`, which probes Hacker News, Stack Overflow, Reddit, and the repository's own issues for regret and postmortem phrases. Every source reports its own status, and `available_sources: 0` means no evidence was gathered, never that no complaints exist.
 - Agent Reach discovers and searches pages; managed DonSeTch `3.4.4` reads dynamic pages through an isolated CLI/JSON boundary.
 - Search snippets are discovery only. Wheel reads the accessible page before creating Evidence and preserves blocked, partial, truncated, or thin results honestly.
+
+## The daily catalog
+
+A live query already answers "what exists". Only a snapshot taken yesterday can
+answer "what is moving", so that is the one job the catalog holds, and it needs
+no server to do it.
+
+- `.github/workflows/sync-catalog.yml` runs `scripts/build_catalog.py` on a daily cron and on manual dispatch. There is no VPS: GitHub Actions is the host, `GITHUB_TOKEN` is the credential, and every action is pinned to a commit SHA. One measured run costs 264 API requests and about 200 seconds.
+- Every record is built from GitHub API responses. Nothing is scraped from a rendered page, and every record names its origin as `github-search:<id>` or `awesome-list:<id>`.
+- Movement is measured against the previous published catalog as `stars_delta` and `stars_per_day`. A record with no history carries `null`, because "did not move" and "not known" are different statements.
+- The published set is 400 records in four tiers: 120 curated entries from the awesome lists, 60 emerging gems, 180 ranked by measured movement, and the remainder as fresh intake by stars, so repositories without history get a baseline for tomorrow instead of being locked out.
+- The gem tier exists because every other tier ranks by stars, and a gem is by definition what the star ranking has not found yet: young, licensed, actively pushed, under 500 stars.
+- Curated lists are read as first-class sources, among them `ashishps1/awesome-system-design-resources`, `punkpeye/awesome-mcp-servers`, `hesreallyhim/awesome-claude-code`, `awesome-selfhosted`, and `public-apis`.
+- Both registries are one contract. The build fails when a source declares no capability, or one `registry/capabilities.yaml` cannot classify, so a record nobody could reach is never published.
+
+  ```bash
+  python scripts/wheel.py sync-catalog --json
+  python scripts/wheel.py search-catalog --kind mcp-server --capability mcp-servers --limit 20 --json
+  python scripts/wheel.py search-catalog --moving --limit 20 --json
+  python scripts/wheel.py search-catalog --query "task tracker" --gem --json
+  ```
+
+- `--moving` returns only records with measured movement, ranked by rate rather than by absolute stars. Every result carries `age_days`, `stale`, `with_momentum`, `matched`, and `truncated`, so the catalog never enters an agent's context wholesale.
+
+### The second origin
+
+The client reads the catalog from jsDelivr and `raw.githubusercontent.com`. Both
+resolve the same `data` branch, so they survive one CDN having a bad day, not
+GitHub being down. The optional Cloudflare edge is what makes the second origin
+independent.
+
+- `edge/worker.js` serves `catalog.jsonl` and `catalog.meta.json` from Cloudflare KV, read-only, with an ETag and a 304 on `If-None-Match`. `/health` reports the upload timestamp and record count.
+- The nightly workflow uploads through `scripts/publish_edge.py`, and the step is skipped unless all three Cloudflare secrets are present, so a half-configured repository cannot fail the job.
+- The client prefers `WHEEL_CATALOG_EDGE_URL` when that environment variable is set on the machine running the plugin. It is validated as HTTPS and allowlisted for that call only. Unset, nothing changes.
+- Full deployment instructions live in [edge/README.md](./edge/README.md).
 
 ## Install
 
@@ -65,10 +105,10 @@
 
 - Add the Wheel marketplace and install the plugin:
 
-  ~~~bash
+  ```bash
   codex plugin marketplace add kalpakprod/wheel --ref main
   codex plugin add wheel@wheel
-  ~~~
+  ```
 
 - Start a new Codex task after updating the plugin so the current skills and manifests are loaded together.
 
@@ -76,9 +116,9 @@
 
 - Install the tagged package:
 
-  ~~~bash
-  prime-agent package install git:github.com/kalpakprod/wheel@v0.6.0
-  ~~~
+  ```bash
+  prime-agent package install git:github.com/kalpakprod/wheel@v0.7.0
+  ```
 
 - Start a new session or run `/reload`. Wheel resolves its runtime from the installed package, not from the current project directory.
 
@@ -86,10 +126,10 @@
 
 - Add the marketplace and install Wheel:
 
-  ~~~text
+  ```text
   /plugin marketplace add kalpakprod/wheel
   /plugin install wheel@wheel
-  ~~~
+  ```
 
 - Restart the session so the optional SessionStart adapter can run.
 
@@ -104,25 +144,37 @@
 - The Python runtime uses only the standard library.
 - Inspect the host and managed dependency:
 
-  ~~~bash
+  ```bash
   python scripts/wheel.py doctor --json
   python scripts/wheel.py dependencies --json
-  ~~~
+  ```
 
 - First activation installs only the tested DonSeTch version and checks upstream metadata through a 24-hour cache:
 
-  ~~~bash
+  ```bash
   python scripts/wheel.py dependencies --ensure --check-latest --json
-  ~~~
+  ```
 
 - Set `WHEEL_NO_BOOTSTRAP=1` to disable automatic installation while keeping diagnostics.
 - Wheel downloads the official upstream asset, verifies the manifest-pinned SHA-256, allows only the exact platform payload, and checks the binary version before use.
 - A newer upstream DonSeTch release reports `update_available`; Wheel keeps the tested pin until a later Wheel release verifies it.
+- Measure a candidate instead of trusting its README. Each command reports per-source status, and anything unmeasured says so rather than passing as a zero:
+
+  ```bash
+  python scripts/wheel.py community-signals --slug psf/requests --json
+  python scripts/wheel.py dependency-debt --slug psf/requests --json
+  python scripts/wheel.py hard-metrics --slug psf/requests --json
+  ```
+
+- `hard-metrics` returns bus factor, HHI contributor concentration, commit cadence over 52 weeks, and release cadence. On `psf/requests` it measured a bus factor of 3, HHI 0.1572, 120 commits across 52 weeks, and 19 releases at a 19.03-day median interval.
+- `dependency-debt` returns the transitive count from GitHub's SBOM, the direct count from manifests across seven ecosystems, and the unlicensed package count. On `psf/requests` it measured 6 direct and 30 transitive. When the SBOM is unavailable the status is `partial` and `transitive` is `null`.
+- `community-signals` probes one regret phrase at a time, because a single query joining every phrase matches nothing on Algolia and is rejected outright by GitHub search. `registry/probe_terms.yaml` carries phrases for en, ru, es, pt, de, fr, zh, and ja; English is always probed, `WHEEL_PROBE_LANGS` adds more, and the total is capped at eight terms per source so the API cost cannot explode.
+- Reddit uses app-only OAuth through `WHEEL_REDDIT_CLIENT_ID` and `WHEEL_REDDIT_CLIENT_SECRET`. No user account is involved, so the plugin cannot get a user's Reddit account banned. Without credentials it falls back to the managed DonSeTch reader, and then to an honest `blocked` status.
 - Read one dynamic page through the managed binary:
 
-  ~~~bash
+  ```bash
   python scripts/wheel.py read-url https://gittrend.io/repo/gastownhall/beads --focus "dated trend metrics" --json
-  ~~~
+  ```
 
 - DonSeTch is a separate `AGPL-3.0-only` process and is not bundled with Wheel. See [NOTICE](./NOTICE).
 
@@ -145,7 +197,7 @@
 
 - The compact project map is:
 
-  ~~~text
+  ```text
   .codex-plugin/plugin.json        Codex package
   .claude-plugin/                  Claude Code package
   skills/wheel/                    user entry point
@@ -156,7 +208,7 @@
   registry/dependencies.json       tested managed dependencies
   scripts/wheel.py                 portable deterministic runtime
   tests/test_wheel.py              runtime and security contracts
-  ~~~
+  ```
 
 - Optional Claude hooks live under `hooks/`; GitHub visuals live under `assets/readme/`.
 
