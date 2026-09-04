@@ -48,9 +48,13 @@ def _wheel_core() -> Any:
     return module
 
 
-_bounded_https_download = getattr(_wheel_core(), "_bounded_https_download")
-_gh_api = getattr(_wheel_core(), "_gh_api")
-_timestamp = getattr(_wheel_core(), "_timestamp")
+# Bind from one module object: the first getattr publishes _gh_api into this
+# module's globals, and when this file is __main__ a second _wheel_core() call
+# would match itself by that very attribute and return the wrong module.
+_core = _wheel_core()
+_bounded_https_download = getattr(_core, "_bounded_https_download")
+_gh_api = getattr(_core, "_gh_api")
+_timestamp = getattr(_core, "_timestamp")
 
 
 MAX_RESPONSE_BYTES = 256 * 1024  # 256 KiB
@@ -87,7 +91,47 @@ _PROBE_TERMS_REGISTRY_PATH = (
     Path(__file__).resolve().parents[1] / "registry" / "probe_terms.yaml"
 )
 MAX_PROBE_TERMS: int = 8
+REDDIT_TOKEN_URL = "https://www.reddit.com/api/v1/access_token"
+REDDIT_DEVICE_ID = "DO_NOT_TRACK_THIS_DEVICE"
+REDDIT_INSTALLED_GRANT = "https://oauth.reddit.com/grants/installed_client"
+REDDIT_CLIENT_ID_ENV = "WHEEL_REDDIT_CLIENT_ID"
+REDDIT_CLIENT_SECRET_ENV = "WHEEL_REDDIT_CLIENT_SECRET"
+REDDIT_USER_AGENT_ENV = "WHEEL_REDDIT_USER_AGENT"
+_PLUGIN_MANIFEST = (
+    Path(__file__).resolve().parents[1] / ".claude-plugin" / "plugin.json"
+)
 _REDDIT_TOKEN_CACHE: dict[str, str] = {}
+
+
+def _plugin_version() -> str:
+    """Read the shipped version so the agent string never claims a stale release."""
+    try:
+        manifest = json.loads(_PLUGIN_MANIFEST.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "0.0.0"
+    version = manifest.get("version")
+    return version if isinstance(version, str) and version else "0.0.0"
+
+
+def reddit_user_agent() -> str:
+    """Reddit throttles shared agents, so an operator may name their own install."""
+    configured = os.environ.get(REDDIT_USER_AGENT_ENV, "").strip()
+    if configured:
+        return configured
+    return f"wheel/{_plugin_version()} (+https://github.com/kalpakprod/wheel)"
+
+
+def _reddit_grant_payload(client_secret: str) -> dict[str, str]:
+    """Pick the grant Reddit accepts for this app type instead of guessing one.
+
+    A script or web app is a confidential client and answers to client_credentials.
+    An installed app carries no secret and answers only to the installed_client grant.
+    The wrong grant returns 401 with no explanation, so the choice is made from the
+    one fact that distinguishes the two: whether a secret was configured.
+    """
+    if client_secret:
+        return {"grant_type": "client_credentials"}
+    return {"grant_type": REDDIT_INSTALLED_GRANT, "device_id": REDDIT_DEVICE_ID}
 
 
 def load_probe_terms(registry_path: Path | None = None) -> list[str]:
@@ -171,7 +215,7 @@ def _reddit_http_request(
     req = urllib.request.Request(
         url, data=data, method="POST" if data is not None else "GET"
     )
-    req.add_header("User-Agent", "wheel-plugin/1.0 (community-signals)")
+    req.add_header("User-Agent", reddit_user_agent())
     if headers:
         for k, v in headers.items():
             req.add_header(k, v)
@@ -325,7 +369,7 @@ def _get_reddit_oauth_token() -> str | None:
     Caches token in-memory in _REDDIT_TOKEN_CACHE for the process only.
     Never prints or logs credentials.
     """
-    client_id = os.environ.get("WHEEL_REDDIT_CLIENT_ID", "").strip()
+    client_id = os.environ.get(REDDIT_CLIENT_ID_ENV, "").strip()
     if not client_id:
         return None
 
@@ -333,17 +377,12 @@ def _get_reddit_oauth_token() -> str | None:
     if cached:
         return cached
 
-    client_secret = os.environ.get("WHEEL_REDDIT_CLIENT_SECRET", "").strip()
+    client_secret = os.environ.get(REDDIT_CLIENT_SECRET_ENV, "").strip()
     user_pass = f"{client_id}:{client_secret}".encode("utf-8")
     basic_auth = base64.b64encode(user_pass).decode("ascii")
 
-    token_url = "https://www.reddit.com/api/v1/access_token"
-    data = urllib.parse.urlencode(
-        {
-            "grant_type": "https://oauth.reddit.com/grants/installed_client",
-            "device_id": "DO_NOT_TRACK_THIS_DEVICE",
-        }
-    ).encode("utf-8")
+    token_url = REDDIT_TOKEN_URL
+    data = urllib.parse.urlencode(_reddit_grant_payload(client_secret)).encode("utf-8")
 
     headers = {
         "Authorization": f"Basic {basic_auth}",
@@ -378,6 +417,42 @@ def _get_reddit_oauth_token() -> str | None:
 
     _REDDIT_TOKEN_CACHE["access_token"] = token
     return token
+
+
+def check_reddit_credentials() -> dict[str, Any]:
+    """Mint a token and report the outcome, so a misconfigured app is visible at once.
+
+    Returns the grant that was attempted and the failure text. Credentials themselves
+    are never returned, printed or logged.
+    """
+    client_id = os.environ.get(REDDIT_CLIENT_ID_ENV, "").strip()
+    if not client_id:
+        return {
+            "source": "reddit",
+            "status": "unconfigured",
+            "grant": "",
+            "reason": f"{REDDIT_CLIENT_ID_ENV} is not set",
+        }
+    client_secret = os.environ.get(REDDIT_CLIENT_SECRET_ENV, "").strip()
+    grant = _reddit_grant_payload(client_secret)["grant_type"]
+    _REDDIT_TOKEN_CACHE.pop("access_token", None)
+    try:
+        token = _get_reddit_oauth_token()
+    except Exception as exc:
+        return {
+            "source": "reddit",
+            "status": "error",
+            "grant": grant,
+            "reason": str(exc),
+        }
+    if not token:
+        return {
+            "source": "reddit",
+            "status": "unconfigured",
+            "grant": grant,
+            "reason": f"{REDDIT_CLIENT_ID_ENV} is not set",
+        }
+    return {"source": "reddit", "status": "ok", "grant": grant, "reason": ""}
 
 
 def _search_reddit_oauth(query: str, limit: int, token: str) -> dict:
@@ -784,7 +859,12 @@ def main(argv: list[str] | None = None) -> int:
         description="Search Reddit, Hacker News, and GitHub issues for community regret signals.",
     )
     parser.add_argument(
-        "--slug", required=True, help="GitHub repository slug (owner/repo)"
+        "--slug", default=None, help="GitHub repository slug (owner/repo)"
+    )
+    parser.add_argument(
+        "--check-reddit",
+        action="store_true",
+        help="Verify the configured Reddit app can mint a token, then exit",
     )
     parser.add_argument(
         "--display-name",
@@ -800,6 +880,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true", help="Output results as JSON")
 
     args = parser.parse_args(argv)
+
+    if args.check_reddit:
+        report = check_reddit_credentials()
+        if args.json:
+            print(json.dumps(report, indent=2))
+        else:
+            grant = f" ({report['grant']})" if report["grant"] else ""
+            print(f"reddit: {report['status']}{grant}")
+            if report["reason"]:
+                print(f"  reason: {report['reason']}")
+        return 0 if report["status"] == "ok" else 1
+
+    if not args.slug:
+        parser.error("--slug is required unless --check-reddit is used")
 
     results = collect_regret_signals(
         slug=args.slug,

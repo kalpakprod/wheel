@@ -170,6 +170,16 @@ independent.
 - `dependency-debt` returns the transitive count from GitHub's SBOM, the direct count from manifests across seven ecosystems, and the unlicensed package count. On `psf/requests` it measured 6 direct and 30 transitive. When the SBOM is unavailable the status is `partial` and `transitive` is `null`.
 - `community-signals` probes one regret phrase at a time, because a single query joining every phrase matches nothing on Algolia and is rejected outright by GitHub search. `registry/probe_terms.yaml` carries phrases for en, ru, es, pt, de, fr, zh, and ja; English is always probed, `WHEEL_PROBE_LANGS` adds more, and the total is capped at eight terms per source so the API cost cannot explode.
 - Reddit uses app-only OAuth through `WHEEL_REDDIT_CLIENT_ID` and `WHEEL_REDDIT_CLIENT_SECRET`. No user account is involved, so the plugin cannot get a user's Reddit account banned. Without credentials it falls back to the managed DonSeTch reader, and then to an honest `blocked` status.
+- The grant follows the app type registered at <https://www.reddit.com/prefs/apps>: a **script** or **web app** carries a secret and authenticates with `client_credentials`, an **installed app** carries none and authenticates with `installed_client`. Sending the wrong grant returns a bare 401, so Wheel selects it from whether a secret is set rather than guessing.
+- `WHEEL_REDDIT_USER_AGENT` overrides the request agent. Reddit throttles by agent string, so an installation issuing many probes should name itself, for example `wheel/0.7.0 (by u/yourname)`.
+- Verify credentials before trusting a run:
+
+  ```bash
+  python scripts/community_signals.py --check-reddit
+  ```
+
+  It prints `ok`, `unconfigured` or `error` with the attempted grant, exits non-zero on anything but `ok`, and never echoes the credentials.
+
 - Read one dynamic page through the managed binary:
 
   ```bash

@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import sys
+import subprocess
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -10,6 +11,7 @@ import urllib.error
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from scripts import community_signals
 from scripts.community_signals import (
     NEGATIVE_TERMS,
     PROBE_TERMS,
@@ -475,6 +477,131 @@ class TestCommunitySignals(unittest.TestCase):
         missing_path = Path("this_file_does_not_exist_xyz.yaml")
         terms = load_probe_terms(registry_path=missing_path)
         self.assertEqual(terms, list(PROBE_TERMS[:8]))
+
+
+class RedditAuthTests(unittest.TestCase):
+    """The Reddit app type decides the grant; the wrong one fails with a bare 401."""
+
+    def setUp(self) -> None:
+        community_signals._REDDIT_TOKEN_CACHE.pop("access_token", None)
+
+    def tearDown(self) -> None:
+        community_signals._REDDIT_TOKEN_CACHE.pop("access_token", None)
+
+    def test_secret_selects_client_credentials(self) -> None:
+        payload = community_signals._reddit_grant_payload("s3cret")
+        self.assertEqual(payload, {"grant_type": "client_credentials"})
+
+    def test_no_secret_selects_installed_client_with_device_id(self) -> None:
+        payload = community_signals._reddit_grant_payload("")
+        self.assertEqual(
+            payload["grant_type"], community_signals.REDDIT_INSTALLED_GRANT
+        )
+        self.assertEqual(payload["device_id"], community_signals.REDDIT_DEVICE_ID)
+
+    def test_token_request_sends_the_selected_grant_and_hides_credentials(self) -> None:
+        seen: dict[str, object] = {}
+
+        def fake_request(url, *, allowed_hosts, headers=None, data=None, **kwargs):
+            seen["url"] = url
+            seen["data"] = data.decode("utf-8")
+            seen["headers"] = headers or {}
+            return 200, b'{"access_token": "t0ken"}', {}
+
+        env = {
+            "WHEEL_REDDIT_CLIENT_ID": "id-abc",
+            "WHEEL_REDDIT_CLIENT_SECRET": "secret-xyz",
+        }
+        with unittest.mock.patch.dict(os.environ, env, clear=False):
+            with unittest.mock.patch.object(
+                community_signals, "_reddit_http_request", fake_request
+            ):
+                token = community_signals._get_reddit_oauth_token()
+
+        self.assertEqual(token, "t0ken")
+        self.assertEqual(seen["url"], community_signals.REDDIT_TOKEN_URL)
+        self.assertIn("grant_type=client_credentials", seen["data"])
+        self.assertNotIn("secret-xyz", str(seen["url"]))
+        self.assertNotIn("secret-xyz", str(seen["data"]))
+        self.assertTrue(seen["headers"]["Authorization"].startswith("Basic "))
+
+    def test_user_agent_is_overridable_and_carries_the_shipped_version(self) -> None:
+        with unittest.mock.patch.dict(
+            os.environ, {"WHEEL_REDDIT_USER_AGENT": "acme/9 (+contact)"}, clear=False
+        ):
+            self.assertEqual(community_signals.reddit_user_agent(), "acme/9 (+contact)")
+        with unittest.mock.patch.dict(
+            os.environ, {"WHEEL_REDDIT_USER_AGENT": ""}, clear=False
+        ):
+            agent = community_signals.reddit_user_agent()
+        self.assertTrue(agent.startswith("wheel/"))
+        self.assertNotIn("wheel/0.0.0", agent)
+
+    def test_check_reports_unconfigured_without_touching_the_network(self) -> None:
+        def explode(*args, **kwargs):
+            raise AssertionError("no request may be made without a client id")
+
+        with unittest.mock.patch.dict(
+            os.environ, {"WHEEL_REDDIT_CLIENT_ID": ""}, clear=False
+        ):
+            with unittest.mock.patch.object(
+                community_signals, "_reddit_http_request", explode
+            ):
+                report = community_signals.check_reddit_credentials()
+
+        self.assertEqual(report["status"], "unconfigured")
+        self.assertEqual(report["grant"], "")
+
+    def test_check_reports_failure_without_leaking_the_secret(self) -> None:
+        def fake_request(url, *, allowed_hosts, headers=None, data=None, **kwargs):
+            return 401, b"", {}
+
+        env = {
+            "WHEEL_REDDIT_CLIENT_ID": "id-abc",
+            "WHEEL_REDDIT_CLIENT_SECRET": "secret-xyz",
+        }
+        with unittest.mock.patch.dict(os.environ, env, clear=False):
+            with unittest.mock.patch.object(
+                community_signals, "_reddit_http_request", fake_request
+            ):
+                report = community_signals.check_reddit_credentials()
+
+        self.assertEqual(report["status"], "error")
+        self.assertEqual(report["grant"], "client_credentials")
+        self.assertIn("401", report["reason"])
+        self.assertNotIn("secret-xyz", report["reason"])
+        self.assertNotIn("id-abc", report["reason"])
+
+    def test_check_reports_ok_when_a_token_is_minted(self) -> None:
+        def fake_request(url, *, allowed_hosts, headers=None, data=None, **kwargs):
+            return 200, b'{"access_token": "t0ken"}', {}
+
+        env = {"WHEEL_REDDIT_CLIENT_ID": "id-abc", "WHEEL_REDDIT_CLIENT_SECRET": ""}
+        with unittest.mock.patch.dict(os.environ, env, clear=False):
+            with unittest.mock.patch.object(
+                community_signals, "_reddit_http_request", fake_request
+            ):
+                report = community_signals.check_reddit_credentials()
+
+        self.assertEqual(report["status"], "ok")
+        self.assertEqual(report["grant"], community_signals.REDDIT_INSTALLED_GRANT)
+        self.assertEqual(report["reason"], "")
+
+
+class ScriptEntryPointTests(unittest.TestCase):
+    """Each helper is documented as a plain script, so it must run as one."""
+
+    def test_every_script_runs_as_a_file_not_only_as_a_module(self) -> None:
+        repo = Path(__file__).resolve().parents[1]
+        for name in ("community_signals", "dependency_debt", "hard_metrics"):
+            with self.subTest(script=name):
+                completed = subprocess.run(
+                    [sys.executable, str(repo / "scripts" / f"{name}.py"), "--help"],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+                self.assertEqual(completed.returncode, 0, completed.stderr[-400:])
 
 
 if __name__ == "__main__":
