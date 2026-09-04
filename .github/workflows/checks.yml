@@ -14,9 +14,9 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
 
@@ -26,6 +26,10 @@ jobs:
 
       - name: unit tests
         run: python -m unittest discover -s tests -v
+
+      - name: catalog producer contract
+        run: >-
+          python -c "import json, sys, tempfile; sys.path.insert(0, '.'); from pathlib import Path; from scripts.build_catalog import _record, validate; record = _record({'full_name': 'owner/repo', 'stargazers_count': 12, 'pushed_at': '2026-08-20T00:00:00Z', 'license': {'spdx_id': 'MIT'}, 'topics': ['mcp']}, 'mcp-server', 'ci', 'mcp-servers', '2026-09-01T00:00:00Z'); path = Path(tempfile.mkdtemp()) / 'catalog.jsonl'; path.write_text(json.dumps(record) + '\n', encoding='utf-8'); assert validate(path) == 1"
 
       - name: compile Python sources
         run: python -m compileall -q scripts tests
@@ -37,7 +41,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: shell syntax
         run: sh -n hooks/session-start.sh
