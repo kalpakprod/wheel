@@ -18,11 +18,22 @@ For a valid Verdict, state:
 - Candidate roles: `base`, `fork`, `donor`, `plugin`, `sidecar`, `alternative`;
 - each donor's function, license basis, and integration method: `plugin`, `api`, `sidecar`, `cherry-pick`, or `port`;
 - a gain, cost, and score comparison with rejected alternatives and reasons;
+- an Explicit Sacrifice section: state clearly what the architecture is sacrificing (e.g. memory footprint, conceptual complexity, transitive dependency risk, operational overhead) by picking this solution;
+- a Tradeoff Matrix comparing the top candidates across 5 axes: Performance/Resource, Complexity/DX, Maintenance Cadence, Ecosystem/Portability, and Lock-in Risk;
+- a Minimal DX Code Snippet illustrating the candidate's integration interface;
 - up to three adjacent capabilities already in the selected Core;
 - separate sections for "already included, enable?" and "later, do not build";
 - the next post-acceptance action, without implementing it.
 
 Do not propose `hard-fork` without measured code, data, and integration migration costs, or without comparison to extending the current system. Do not copy donor code when its license does not permit the intended use.
+
+## Decision schema
+
+Every new decision uses the `expert` schema: `explicit_sacrifice`, `tradeoff_matrix`, `code_comparison`, and `evidence_gaps` are all mandatory and validated by `render_decision`. Supplying one of them commits the decision to that schema, so a partial expert verdict is rejected rather than silently truncated. Set `"schema": "legacy"` only for a decision that predates this contract; a legacy decision carrying any expert field is rejected.
+
+`evidence_gaps` is a list of `{"source": ..., "reason": ...}` objects, and it is where the decision admits what it could not check. Every source you consulted that returned nothing, was blocked, rate-limited, or unavailable belongs in it, with the reason string the command itself returned, verbatim: `reddit: HTTP 403`, `hackernews: 0 matches for every probe term`, `github_issues: gh api returned no payload`. An empty list is permitted and it is a claim you must be able to defend: every source answered.
+
+Read the commands' own output honestly. `available_sources: 0` from `community-signals` means no evidence was gathered, never that no complaints exist. A `partial` or `unavailable` status from `dependency-debt` or `hard-metrics` means the metric was not measured, and a decision that treats an unmeasured metric as a passing one is the failure this plugin exists to prevent.
 
 ## Acceptance gate
 
@@ -41,13 +52,21 @@ Render a stable, Clausative Markdown record from the runtime decision JSON. Its 
 
 ```md
 ## Request
+
 ## Coverage
+
 ## Candidates
+
 ## Decided
+
 ## Core and integration
+
 ## Donors and licenses
+
 ## Rejected alternatives
+
 ## Already included, enable?
+
 ## Later, do not build
 ```
 

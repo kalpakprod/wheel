@@ -1,0 +1,11 @@
+name = "wheel-catalog-edge"
+main = "worker.js"
+compatibility_date = "2024-09-01"
+
+# The namespace id is created once with:
+#   npx wrangler kv namespace create wheel-catalog
+# and the id it prints replaces the placeholder below. The daily workflow writes
+# into this namespace through the Cloudflare API; the Worker only reads.
+[[kv_namespaces]]
+binding = "CATALOG"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"

@@ -1,0 +1,51 @@
+# Regret / abandonment probe phrases grouped by language code.
+# The English set is always probed, plus any languages specified in WHEEL_PROBE_LANGS.
+# Total probe terms per source are capped at 8 to prevent API cost explosions.
+
+en:
+  - "postmortem"
+  - "migrated away"
+  - "alternative to"
+  - "problems with"
+
+ru:
+  - "ушёл с"
+  - "перешли на"
+  - "проблемы с"
+  - "перестали использовать"
+
+es:
+  - "migramos de"
+  - "dejamos de usar"
+  - "problemas con"
+  - "postmortem"
+
+pt:
+  - "migramos de"
+  - "deixamos de usar"
+  - "problemas com"
+  - "mudamos para"
+
+de:
+  - "umgestiegen von"
+  - "nicht mehr nutzen"
+  - "probleme mit"
+  - "postmortem"
+
+fr:
+  - "migré de"
+  - "arrêté d'utiliser"
+  - "problèmes avec"
+  - "postmortem"
+
+zh:
+  - "放弃使用"
+  - "迁移到"
+  - "从...迁移"
+  - "踩坑"
+
+ja:
+  - "移行した"
+  - "使うのをやめた"
+  - "不具合"
+  - "乗り換え"

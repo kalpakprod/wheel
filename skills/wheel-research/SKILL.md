@@ -88,6 +88,15 @@ Begin only after `wheel-grilling` says the next answer cannot change the final C
 - Canonicalize repository Candidates as `owner/repo`; connect forks with `fork-of` and record donor functions and integration evidence.
 - If fewer than four viable Candidates remain, expand the query with synonyms, adjacent niches, and English terminology. Stop after two consecutive expansions add no viable Candidate.
 - Read documentation, installation path, licenses, and activity for viable Cores. Read code, tests, and architecture for two or three possible Cores; read the relevant donor parts before claiming portability.
+- Deep review candidate commands: for every candidate under deep review, run the three automated inspection commands:
+  - `python "<wheel-root>/scripts/wheel.py" community-signals --slug <owner/repo> --json`
+  - `python "<wheel-root>/scripts/wheel.py" dependency-debt --slug <owner/repo> --json`
+  - `python "<wheel-root>/scripts/wheel.py" hard-metrics --slug <owner/repo> --json`
+    A source whose status is not `ok` (e.g. `unavailable`, `partial`, `blocked`, or `error`) must be recorded and reported as missing evidence rather than as a clean result or passing audit.
+- Offline catalog first: run `scripts/wheel.py search-catalog --kind <archetype> --json` before live routes and seed the Candidate set from its matches, recording `age_days` and `stale` in the SourceResult. A catalog hit is a lead, never Evidence; verify it live before it counts.
+- The catalog is a movement index, not a mirror of GitHub. Add `--moving` when the request is about momentum or what is gaining traction; the result ranks by measured `stars_per_day` and carries `with_momentum`. When `with_momentum` is `0` the index has no history yet, so report the absence and use live routes for trend rather than treating star counts as movement.
+- Regret mining: probe GitHub issues, Reddit, and Hacker News using negative/postmortem patterns (`"{candidate} postmortem"`, `"{candidate} migration OR replaced"`, `"{candidate} memory leak"`). Record concrete architectural pitfalls as Evidence with `signal_type="risk"`.
+- Transitive bloat audit: check manifests (`package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`) for dependency tree depth and zero-dep advantages. Do not penalize young repos ("hidden gems") solely for low star counts if code health, cadence, and license safety are high.
 - Report progress at least once per minute during a long pass and persist completed SourceResults before continuing.
 
 ## Verification and coverage

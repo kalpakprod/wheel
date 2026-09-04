@@ -6,3 +6,11 @@ __pycache__/
 .diagram-design
 assets/readme/pipeline.html
 docs/plans/
+
+# catalog producer output; published to the data branch by CI, never committed to main
+dist/
+
+# procoder working state; the specs, plans and ADRs beside them are tracked
+.procoder/state/
+.procoder/index/
+.lycheecache

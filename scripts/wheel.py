@@ -4,8 +4,11 @@ from dataclasses import asdict, dataclass, field
 import argparse
 from contextlib import contextmanager
 from datetime import datetime, timezone
+import http.client
 import errno
 import hashlib
+import importlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -14,6 +17,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 import tarfile
 import tempfile
 import time
@@ -25,7 +29,16 @@ from uuid import uuid4
 
 SourceStatus = Literal["ok", "partial", "unavailable", "blocked", "error"]
 SignalType = Literal["official", "code", "usage", "trend", "discussion", "risk"]
-CandidateKind = Literal["repository", "product", "service"]
+CandidateKind = Literal[
+    "repository",
+    "product",
+    "service",
+    "skill",
+    "plugin",
+    "mcp-server",
+    "design-system",
+    "reference",
+]
 RunState = Literal[
     "context", "quick", "question", "deep", "verify", "decision", "recorded"
 ]
@@ -42,7 +55,18 @@ RUN_STATES: frozenset[str] = frozenset(
 EDGE_KINDS: frozenset[str] = frozenset(
     {"fork-of", "donates", "extends", "integrates", "replaces"}
 )
-CANDIDATE_KINDS: frozenset[str] = frozenset({"repository", "product", "service"})
+CANDIDATE_KINDS: frozenset[str] = frozenset(
+    {
+        "repository",
+        "product",
+        "service",
+        "skill",
+        "plugin",
+        "mcp-server",
+        "design-system",
+        "reference",
+    }
+)
 CANDIDATE_ROLES: frozenset[str] = frozenset(
     {"base", "fork", "donor", "plugin", "sidecar", "alternative"}
 )
@@ -190,7 +214,9 @@ class RunRecord:
         ):
             raise ValueError("source_results must contain SourceResult objects")
         if not isinstance(self.candidates, dict) or not all(
-            isinstance(key, str) and isinstance(value, Candidate) and key == value.candidate_id
+            isinstance(key, str)
+            and isinstance(value, Candidate)
+            and key == value.candidate_id
             for key, value in self.candidates.items()
         ):
             raise ValueError("candidates must map ids to Candidate objects")
@@ -204,12 +230,18 @@ class RunRecord:
         return asdict(self)
 
 
+GITHUB_OWNER_PATTERN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?")
+GITHUB_REPO_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,100}")
+
+
 def normalize_repo_slug(value: str) -> str:
     """Return a lowercase GitHub owner/repository identifier."""
     raw = value.strip()
     if not raw:
         raise ValueError("repository slug is empty")
-    ssh_match = re.fullmatch(r"git@github\.com:([^/\s]+)/([^/\s]+?)(?:\.git)?/?", raw, re.I)
+    ssh_match = re.fullmatch(
+        r"git@github\.com:([^/\s]+)/([^/\s]+?)(?:\.git)?/?", raw, re.I
+    )
     if ssh_match:
         owner, repo = ssh_match.groups()
         return f"{owner}/{repo}".lower()
@@ -224,7 +256,9 @@ def normalize_repo_slug(value: str) -> str:
         raise ValueError(f"invalid GitHub repository: {value}")
     owner, repo = parts
     repo = re.sub(r"\.git$", "", repo, flags=re.I)
-    if not owner or not repo:
+    if not GITHUB_OWNER_PATTERN.fullmatch(owner) or not GITHUB_REPO_PATTERN.fullmatch(
+        repo
+    ):
         raise ValueError(f"invalid GitHub repository: {value}")
     return f"{owner}/{repo}".lower()
 
@@ -239,17 +273,30 @@ def _normalize_typed_slug(value: str, kind: CandidateKind) -> str:
 def normalize_candidate_id(value: str) -> tuple[CandidateKind, str]:
     """Return a canonical repository id or an explicitly typed non-repository id."""
     raw = _require_non_empty_string(value, "candidate_id").strip()
-    typed = re.fullmatch(r"(product|service):(.*)", raw, re.I)
+    typed = re.fullmatch(
+        r"(product|service|skill|plugin|mcp-server|design-system|reference):(.*)",
+        raw,
+        re.I,
+    )
     if typed:
-        kind = typed.group(1).casefold()
-        if kind == "product":
-            return "product", _normalize_typed_slug(typed.group(2), "product")
-        return "service", _normalize_typed_slug(typed.group(2), "service")
+        kind_str = typed.group(1).casefold()
+        typed_kind: CandidateKind
+        if kind_str in (
+            "product",
+            "service",
+            "skill",
+            "plugin",
+            "mcp-server",
+            "design-system",
+            "reference",
+        ):
+            typed_kind = kind_str  # type: ignore[assignment]
+            return typed_kind, _normalize_typed_slug(typed.group(2), typed_kind)
     try:
         return "repository", normalize_repo_slug(raw)
     except ValueError as error:
         raise ValueError(
-            "non-repository candidates require a typed product: or service: id"
+            "non-repository candidates require a typed prefix (product:, service:, skill:, plugin:, mcp-server:, design-system:, reference:)"
         ) from error
 
 
@@ -271,7 +318,9 @@ def add_candidate_role(candidate: Candidate, role: str) -> None:
     if role == "alternative" and candidate.roles != ["alternative"]:
         return
     if role != "alternative":
-        candidate.roles[:] = [existing for existing in candidate.roles if existing != "alternative"]
+        candidate.roles[:] = [
+            existing for existing in candidate.roles if existing != "alternative"
+        ]
     if role not in candidate.roles:
         candidate.roles.append(role)
 
@@ -306,11 +355,17 @@ def candidate_graph(
     candidates: dict[str, Candidate], edges: list[dict[str, str]]
 ) -> dict[str, Any]:
     """Return a JSON-serializable graph with explicitly typed edges."""
-    if any(candidate_id != candidate.candidate_id for candidate_id, candidate in candidates.items()):
+    if any(
+        candidate_id != candidate.candidate_id
+        for candidate_id, candidate in candidates.items()
+    ):
         raise ValueError("candidate graph ids must match candidates")
     normalized_edges = [_normalize_edge(edge) for edge in edges]
     return {
-        "candidates": {candidate_id: asdict(candidate) for candidate_id, candidate in candidates.items()},
+        "candidates": {
+            candidate_id: asdict(candidate)
+            for candidate_id, candidate in candidates.items()
+        },
         "edges": normalized_edges,
     }
 
@@ -344,12 +399,19 @@ def _merge_candidate(target: Candidate, incoming: Candidate) -> None:
             seen.add(evidence_key(evidence))
 
 
-def _merge_edges(existing: list[dict[str, str]], incoming: list[dict[str, str]]) -> list[dict[str, str]]:
+def _merge_edges(
+    existing: list[dict[str, str]], incoming: list[dict[str, str]]
+) -> list[dict[str, str]]:
     merged = [_normalize_edge(edge) for edge in existing]
-    seen = {tuple(edge[name] for name in ("kind", "source", "target", "feature")) for edge in merged}
+    seen = {
+        tuple(edge[name] for name in ("kind", "source", "target", "feature"))
+        for edge in merged
+    }
     for edge in incoming:
         normalized = _normalize_edge(edge)
-        key = tuple(normalized[name] for name in ("kind", "source", "target", "feature"))
+        key = tuple(
+            normalized[name] for name in ("kind", "source", "target", "feature")
+        )
         if key not in seen:
             merged.append(normalized)
             seen.add(key)
@@ -359,11 +421,20 @@ def _merge_edges(existing: list[dict[str, str]], incoming: list[dict[str, str]])
 def wheel_home(value: str | Path | None = None) -> Path:
     """Resolve the portable Wheel state directory without string path tricks."""
     configured = value if value is not None else os.environ.get("WHEEL_HOME")
-    return Path(configured).expanduser() if configured else Path.home() / ".config" / "wheel"
+    return (
+        Path(configured).expanduser()
+        if configured
+        else Path.home() / ".config" / "wheel"
+    )
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return (
+        datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
 
 
 def _resolved_root(value: str | Path, *, create: bool = False) -> Path:
@@ -418,7 +489,9 @@ def _file_lock(path: Path, timeout: float = 10.0) -> Iterator[None]:
                 if error.errno not in {errno.EACCES, errno.EAGAIN}:
                     raise
                 if time.monotonic() >= deadline:
-                    raise TimeoutError(f"timed out waiting for lock: {path.name}") from None
+                    raise TimeoutError(
+                        f"timed out waiting for lock: {path.name}"
+                    ) from None
                 time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
         yield
     finally:
@@ -459,7 +532,9 @@ def _atomic_text_write(path: Path, content: str) -> None:
 
 def _atomic_json_write(path: Path, value: Any) -> None:
     _require_json_value(value, "file content")
-    _atomic_text_write(path, json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False) + "\n")
+    _atomic_text_write(
+        path, json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
+    )
 
 
 def _candidate_from_dict(candidate: Any) -> Candidate:
@@ -610,9 +685,15 @@ def load_config(home: str | Path | None = None) -> dict[str, Any]:
         raise ValueError("config.json must contain an object")
     lookback_days = loaded.get("lookback_days", config["lookback_days"])
     channels = loaded.get("telegram_channels", config["telegram_channels"])
-    if isinstance(lookback_days, bool) or not isinstance(lookback_days, int) or lookback_days < 1:
+    if (
+        isinstance(lookback_days, bool)
+        or not isinstance(lookback_days, int)
+        or lookback_days < 1
+    ):
         raise ValueError("lookback_days must be a positive integer")
-    if not isinstance(channels, list) or not all(isinstance(channel, str) for channel in channels):
+    if not isinstance(channels, list) or not all(
+        isinstance(channel, str) for channel in channels
+    ):
         raise ValueError("telegram_channels must be a list of strings")
     return {"lookback_days": lookback_days, "telegram_channels": channels}
 
@@ -624,11 +705,21 @@ DONSETCH_DOWNLOAD_LIMIT_BYTES = 128 * 1024 * 1024
 DONSETCH_VERSION_TIMEOUT_SECONDS = 10.0
 DONSETCH_FETCH_TIMEOUT_SECONDS = 30.0
 DONSETCH_LATEST_CACHE_NAME = "latest-release.json"
-SEMVER_PATTERN = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?")
+SEMVER_PATTERN = re.compile(
+    r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?"
+)
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 DONSETCH_PLATFORM_FILES: dict[tuple[str, str], tuple[str, str, tuple[str, ...]]] = {
-    ("Windows", "AMD64"): ("donsetch-win32-x64.tar.gz", "donsetch.exe", ("donsetch.exe", "pdfium.dll")),
-    ("Linux", "x86_64"): ("donsetch-linux-x64.tar.gz", "donsetch", ("donsetch", "libonnxruntime.so")),
+    ("Windows", "AMD64"): (
+        "donsetch-win32-x64.tar.gz",
+        "donsetch.exe",
+        ("donsetch.exe", "pdfium.dll"),
+    ),
+    ("Linux", "x86_64"): (
+        "donsetch-linux-x64.tar.gz",
+        "donsetch",
+        ("donsetch", "libonnxruntime.so"),
+    ),
     ("Linux", "aarch64"): ("donsetch-linux-arm64.tar.gz", "donsetch", ("donsetch",)),
     ("Darwin", "x86_64"): ("donsetch-darwin-x64.tar.gz", "donsetch", ("donsetch",)),
     ("Darwin", "arm64"): ("donsetch-darwin-arm64.tar.gz", "donsetch", ("donsetch",)),
@@ -647,7 +738,13 @@ def _is_semver(value: Any) -> bool:
 
 def _is_https_url(value: Any) -> bool:
     parsed = urlparse(value) if isinstance(value, str) else None
-    return bool(parsed and parsed.scheme == "https" and parsed.netloc and not parsed.username and not parsed.password)
+    return bool(
+        parsed
+        and parsed.scheme == "https"
+        and parsed.netloc
+        and not parsed.username
+        and not parsed.password
+    )
 
 
 def _safe_manifest_component(value: Any) -> bool:
@@ -657,12 +754,18 @@ def _safe_manifest_component(value: Any) -> bool:
     return len(path.parts) == 1 and path.name == value and value not in {".", ".."}
 
 
-def load_dependency_manifest(path: str | Path = DEPENDENCY_MANIFEST_PATH) -> dict[str, Any]:
+def load_dependency_manifest(
+    path: str | Path = DEPENDENCY_MANIFEST_PATH,
+) -> dict[str, Any]:
     """Load the single, pinned dependency manifest without accepting extensions."""
     with Path(path).expanduser().open(encoding="utf-8") as handle:
         raw = json.load(handle)
-    envelope = _require_exact_keys(raw, {"schema_version", "dependencies"}, "dependencies manifest")
-    if envelope["schema_version"] != 1 or not isinstance(envelope["dependencies"], list):
+    envelope = _require_exact_keys(
+        raw, {"schema_version", "dependencies"}, "dependencies manifest"
+    )
+    if envelope["schema_version"] != 1 or not isinstance(
+        envelope["dependencies"], list
+    ):
         raise ValueError("dependencies manifest has an invalid schema")
     dependencies = envelope["dependencies"]
     if len(dependencies) != 1:
@@ -670,8 +773,14 @@ def load_dependency_manifest(path: str | Path = DEPENDENCY_MANIFEST_PATH) -> dic
     dependency = _require_exact_keys(
         dependencies[0],
         {
-            "id", "tested_version", "source_repository", "release_base_url",
-            "license", "license_url", "check_interval_seconds", "platforms",
+            "id",
+            "tested_version",
+            "source_repository",
+            "release_base_url",
+            "license",
+            "license_url",
+            "check_interval_seconds",
+            "platforms",
         },
         "dependency",
     )
@@ -679,21 +788,36 @@ def load_dependency_manifest(path: str | Path = DEPENDENCY_MANIFEST_PATH) -> dic
         raise ValueError("unsupported managed dependency")
     if not _is_semver(dependency["tested_version"]):
         raise ValueError("dependency tested_version must be SemVer")
-    if not isinstance(dependency["source_repository"], str) or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", dependency["source_repository"]):
+    if not isinstance(dependency["source_repository"], str) or not re.fullmatch(
+        r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", dependency["source_repository"]
+    ):
         raise ValueError("dependency source_repository must be owner/repository")
-    if not _is_https_url(dependency["release_base_url"]) or not _is_https_url(dependency["license_url"]):
+    if not _is_https_url(dependency["release_base_url"]) or not _is_https_url(
+        dependency["license_url"]
+    ):
         raise ValueError("dependency URLs must use HTTPS")
     if dependency["license"] != "AGPL-3.0-only":
         raise ValueError("dependency license is invalid")
-    if isinstance(dependency["check_interval_seconds"], bool) or not isinstance(dependency["check_interval_seconds"], int) or dependency["check_interval_seconds"] < 1:
+    if (
+        isinstance(dependency["check_interval_seconds"], bool)
+        or not isinstance(dependency["check_interval_seconds"], int)
+        or dependency["check_interval_seconds"] < 1
+    ):
         raise ValueError("dependency check_interval_seconds must be positive")
     if not isinstance(dependency["platforms"], list) or not dependency["platforms"]:
         raise ValueError("dependency platforms must be a non-empty list")
     seen: set[tuple[str, str]] = set()
     normalized_platforms: list[dict[str, str]] = []
     for item in dependency["platforms"]:
-        platform_item = _require_exact_keys(item, {"system", "machine", "asset", "binary", "required_files", "sha256"}, "dependency platform")
-        if not all(isinstance(platform_item[key], str) and platform_item[key] for key in ("system", "machine")):
+        platform_item = _require_exact_keys(
+            item,
+            {"system", "machine", "asset", "binary", "required_files", "sha256"},
+            "dependency platform",
+        )
+        if not all(
+            isinstance(platform_item[key], str) and platform_item[key]
+            for key in ("system", "machine")
+        ):
             raise ValueError("dependency platform system and machine must be strings")
         key = (platform_item["system"], platform_item["machine"])
         if key in seen:
@@ -702,7 +826,9 @@ def load_dependency_manifest(path: str | Path = DEPENDENCY_MANIFEST_PATH) -> dic
         if expected_files is None:
             raise ValueError("dependency platform tuple is unsupported")
         seen.add(key)
-        if not _safe_manifest_component(platform_item["asset"]) or not platform_item["asset"].endswith(".tar.gz"):
+        if not _safe_manifest_component(platform_item["asset"]) or not platform_item[
+            "asset"
+        ].endswith(".tar.gz"):
             raise ValueError("dependency asset name is invalid")
         if not _safe_manifest_component(platform_item["binary"]):
             raise ValueError("dependency binary name is invalid")
@@ -716,20 +842,30 @@ def load_dependency_manifest(path: str | Path = DEPENDENCY_MANIFEST_PATH) -> dic
         ):
             raise ValueError("dependency required_files is invalid")
         if (
-            platform_item["asset"], platform_item["binary"], tuple(required_files)
+            platform_item["asset"],
+            platform_item["binary"],
+            tuple(required_files),
         ) != expected_files:
             raise ValueError("dependency platform files are unexpected")
-        if not isinstance(platform_item["sha256"], str) or SHA256_PATTERN.fullmatch(platform_item["sha256"]) is None:
+        if (
+            not isinstance(platform_item["sha256"], str)
+            or SHA256_PATTERN.fullmatch(platform_item["sha256"]) is None
+        ):
             raise ValueError("dependency sha256 is invalid")
         normalized_platforms.append(dict(platform_item))
     if seen != set(DONSETCH_PLATFORM_FILES):
         raise ValueError("dependencies manifest must contain every supported platform")
-    result = {"schema_version": 1, "dependencies": [{**dependency, "platforms": normalized_platforms}]}
+    result = {
+        "schema_version": 1,
+        "dependencies": [{**dependency, "platforms": normalized_platforms}],
+    }
     _require_json_value(result, "dependencies manifest")
     return result
 
 
-def dependency_platform(manifest: dict[str, Any], system: str | None = None, machine: str | None = None) -> dict[str, Any] | None:
+def dependency_platform(
+    manifest: dict[str, Any], system: str | None = None, machine: str | None = None
+) -> dict[str, Any] | None:
     """Return the explicitly pinned asset for a supported host tuple."""
     current_system = system if system is not None else platform.system()
     current_machine = machine if machine is not None else platform.machine()
@@ -741,12 +877,22 @@ def dependency_platform(manifest: dict[str, Any], system: str | None = None, mac
 
 
 def _dependency_base(home: str | Path | None, manifest: dict[str, Any]) -> Path:
-    return _resolved_root(wheel_home(home)) / "dependencies" / manifest["dependencies"][0]["id"]
+    return (
+        _resolved_root(wheel_home(home))
+        / "dependencies"
+        / manifest["dependencies"][0]["id"]
+    )
 
 
-def _managed_binary_path(home: str | Path | None, manifest: dict[str, Any], platform_item: dict[str, Any]) -> Path:
+def _managed_binary_path(
+    home: str | Path | None, manifest: dict[str, Any], platform_item: dict[str, Any]
+) -> Path:
     dependency = manifest["dependencies"][0]
-    return _dependency_base(home, manifest) / dependency["tested_version"] / platform_item["binary"]
+    return (
+        _dependency_base(home, manifest)
+        / dependency["tested_version"]
+        / platform_item["binary"]
+    )
 
 
 def _valid_managed_layout(version_root: Path, required_files: Sequence[str]) -> bool:
@@ -755,31 +901,46 @@ def _valid_managed_layout(version_root: Path, required_files: Sequence[str]) -> 
     except OSError:
         return False
     expected = set(required_files)
-    return (
-        {entry.name for entry in entries} == expected
-        and all(entry.name in expected and entry.is_file() and not entry.is_symlink() for entry in entries)
+    return {entry.name for entry in entries} == expected and all(
+        entry.name in expected and entry.is_file() and not entry.is_symlink()
+        for entry in entries
     )
 
 
 def _version_from_output(value: str) -> str | None:
     for line in value.splitlines():
-        match = re.fullmatch(r"DonSeTch\s+v?(" + SEMVER_PATTERN.pattern + r")", line.strip(), re.I)
+        match = re.fullmatch(
+            r"DonSeTch\s+v?(" + SEMVER_PATTERN.pattern + r")", line.strip(), re.I
+        )
         if match:
             return match.group(1)
     if "\n" not in value and "\r" not in value:
-        match = re.fullmatch(r"v?(" + SEMVER_PATTERN.pattern + r")", value.strip(), re.I)
+        match = re.fullmatch(
+            r"v?(" + SEMVER_PATTERN.pattern + r")", value.strip(), re.I
+        )
         if match:
             return match.group(1)
     return None
 
 
-def _probe_managed_binary(binary: Path, expected_version: str, timeout: float = DONSETCH_VERSION_TIMEOUT_SECONDS) -> tuple[bool, str]:
+def _probe_managed_binary(
+    binary: Path,
+    expected_version: str,
+    timeout: float = DONSETCH_VERSION_TIMEOUT_SECONDS,
+) -> tuple[bool, str]:
     environment = dict(os.environ)
     environment["NO_COLOR"] = "1"
     try:
         completed = subprocess.run(
-            [str(binary), "--version"], check=False, capture_output=True, text=True,
-            timeout=timeout, shell=False, env=environment,
+            [str(binary), "--version"],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            shell=False,
+            env=environment,
         )
     except (OSError, subprocess.TimeoutExpired):
         return False, "managed version probe failed"
@@ -798,7 +959,12 @@ def _latest_cache_path(home: str | Path | None, manifest: dict[str, Any]) -> Pat
 def _read_latest_cache(path: Path, interval: int, now: float) -> dict[str, str] | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict) or set(data) != {"version", "checked_at"} or not _is_semver(data["version"]) or not isinstance(data["checked_at"], str):
+        if (
+            not isinstance(data, dict)
+            or set(data) != {"version", "checked_at"}
+            or not _is_semver(data["version"])
+            or not isinstance(data["checked_at"], str)
+        ):
             return None
         if now - _timestamp(data["checked_at"]) > interval:
             return None
@@ -816,19 +982,25 @@ class _HTTPSRedirect(urllib_request.HTTPRedirectHandler):
         super().__init__()
         self._hosts = hosts
 
-    def redirect_request(self, request: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> Any:
+    def redirect_request(
+        self, request: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str
+    ) -> Any:
         parsed = urlparse(newurl)
         if parsed.scheme != "https" or parsed.hostname not in self._hosts:
             raise urllib_error.HTTPError(newurl, code, "unsafe redirect", headers, fp)
         return super().redirect_request(request, fp, code, msg, headers, newurl)
 
 
-def _bounded_https_download(url: str, allowed_hosts: set[str], max_bytes: int = DONSETCH_DOWNLOAD_LIMIT_BYTES) -> bytes:
+def _bounded_https_download(
+    url: str, allowed_hosts: set[str], max_bytes: int = DONSETCH_DOWNLOAD_LIMIT_BYTES
+) -> bytes:
     parsed = urlparse(url)
     if parsed.scheme != "https" or parsed.hostname not in allowed_hosts:
         raise ValueError("dependency download URL is not allowlisted HTTPS")
     opener = urllib_request.build_opener(_HTTPSRedirect(allowed_hosts))
-    request = urllib_request.Request(url, headers={"User-Agent": "wheel-managed-dependency"})
+    request = urllib_request.Request(
+        url, headers={"User-Agent": "wheel-managed-dependency"}
+    )
     with opener.open(request, timeout=30) as response:
         length = response.headers.get("Content-Length")
         if length is not None and (not length.isdigit() or int(length) > max_bytes):
@@ -846,7 +1018,9 @@ def _bounded_https_download(url: str, allowed_hosts: set[str], max_bytes: int = 
     return b"".join(chunks)
 
 
-def _extract_required_files(archive: Path, output: Path, required_files: Sequence[str]) -> None:
+def _extract_required_files(
+    archive: Path, output: Path, required_files: Sequence[str]
+) -> None:
     try:
         with tarfile.open(archive, "r:gz") as tar:
             members = tar.getmembers()
@@ -891,7 +1065,16 @@ def dependency_status(
 ) -> dict[str, str]:
     """Report only public managed-dependency status; it never selects PATH binaries."""
     checked_at = _utc_now()
-    base = {"id": DONSETCH_ID, "status": "unavailable", "path": "", "version": "", "tested_version": "", "latest_version": "", "checked_at": checked_at, "detail": ""}
+    base = {
+        "id": DONSETCH_ID,
+        "status": "unavailable",
+        "path": "",
+        "version": "",
+        "tested_version": "",
+        "latest_version": "",
+        "checked_at": checked_at,
+        "detail": "",
+    }
     try:
         manifest = load_dependency_manifest(manifest_path)
     except (OSError, ValueError, json.JSONDecodeError):
@@ -905,15 +1088,34 @@ def dependency_status(
     base["path"] = str(binary)
     version_root = binary.parent
     if not version_root.exists():
-        result = {**base, "status": "missing", "detail": "managed version is not installed"}
-    elif not binary.is_file() or not _valid_managed_layout(version_root, platform_item["required_files"]):
-        result = {**base, "status": "repair_required", "detail": "managed version is incomplete"}
+        result = {
+            **base,
+            "status": "missing",
+            "detail": "managed version is not installed",
+        }
+    elif not binary.is_file() or not _valid_managed_layout(
+        version_root, platform_item["required_files"]
+    ):
+        result = {
+            **base,
+            "status": "repair_required",
+            "detail": "managed version is incomplete",
+        }
     else:
-        valid, version_or_detail = _probe_managed_binary(binary, dependency["tested_version"])
-        result = {**base, "status": "current" if valid else "repair_required", "version": version_or_detail if valid else "", "detail": "" if valid else version_or_detail}
+        valid, version_or_detail = _probe_managed_binary(
+            binary, dependency["tested_version"]
+        )
+        result = {
+            **base,
+            "status": "current" if valid else "repair_required",
+            "version": version_or_detail if valid else "",
+            "detail": "" if valid else version_or_detail,
+        }
     if check_latest:
         result.update(_latest_release_status(home, manifest, now=now))
-        if result["status"] == "current" and _semver_is_newer(result["latest_version"], dependency["tested_version"]):
+        if result["status"] == "current" and _semver_is_newer(
+            result["latest_version"], dependency["tested_version"]
+        ):
             result["status"] = "update_available"
     return result
 
@@ -921,27 +1123,53 @@ def dependency_status(
 def _semver_is_newer(candidate: str, tested: str) -> bool:
     if not _is_semver(candidate) or not _is_semver(tested):
         return False
+
     def stable_parts(version: str) -> tuple[int, int, int]:
-        return tuple(int(piece) for piece in version.split("-", 1)[0].split("+", 1)[0].split("."))  # type: ignore[return-value]
+        return tuple(
+            int(piece) for piece in version.split("-", 1)[0].split("+", 1)[0].split(".")
+        )  # type: ignore[return-value]
+
     return stable_parts(candidate) > stable_parts(tested)
 
 
-def _latest_release_status(home: str | Path | None, manifest: dict[str, Any], *, now: float | None = None) -> dict[str, str]:
+def _latest_release_status(
+    home: str | Path | None, manifest: dict[str, Any], *, now: float | None = None
+) -> dict[str, str]:
     dependency = manifest["dependencies"][0]
     timestamp = time.time() if now is None else now
     cache_path = _latest_cache_path(home, manifest)
-    cached = _read_latest_cache(cache_path, dependency["check_interval_seconds"], timestamp)
+    cached = _read_latest_cache(
+        cache_path, dependency["check_interval_seconds"], timestamp
+    )
     if cached is not None:
-        return {"latest_version": cached["version"], "checked_at": cached["checked_at"], "detail": ""}
+        return {
+            "latest_version": cached["version"],
+            "checked_at": cached["checked_at"],
+            "detail": "",
+        }
     try:
-        payload = _bounded_https_download(_github_latest_url(dependency["source_repository"]), {"api.github.com"}, 1024 * 1024)
+        payload = _bounded_https_download(
+            _github_latest_url(dependency["source_repository"]),
+            {"api.github.com"},
+            1024 * 1024,
+        )
         data = json.loads(payload)
         tag = data.get("tag_name") if isinstance(data, dict) else None
         version = tag[1:] if isinstance(tag, str) and tag.startswith("v") else tag
         if not _is_semver(version):
             raise ValueError("invalid latest release")
-    except (OSError, ValueError, urllib_error.URLError, urllib_error.HTTPError, json.JSONDecodeError):
-        return {"latest_version": "", "checked_at": _utc_now(), "detail": "latest release check failed"}
+    except (
+        OSError,
+        ValueError,
+        urllib_error.URLError,
+        urllib_error.HTTPError,
+        json.JSONDecodeError,
+    ):
+        return {
+            "latest_version": "",
+            "checked_at": _utc_now(),
+            "detail": "latest release check failed",
+        }
     checked_at = _utc_now()
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     _atomic_json_write(cache_path, {"version": version, "checked_at": checked_at})
@@ -961,32 +1189,55 @@ def ensure_dependency(
     dependency = manifest["dependencies"][0]
     platform_item = dependency_platform(manifest, system, machine)
     if platform_item is None:
-        return dependency_status(home, manifest_path=manifest_path, system=system, machine=machine)
-    before = dependency_status(home, manifest_path=manifest_path, system=system, machine=machine)
+        return dependency_status(
+            home, manifest_path=manifest_path, system=system, machine=machine
+        )
+    before = dependency_status(
+        home, manifest_path=manifest_path, system=system, machine=machine
+    )
     if before["status"] == "current":
         return before
     version_root = _managed_binary_path(home, manifest, platform_item).parent
     if version_root.exists():
-        return {**before, "status": "repair_required", "detail": "managed version is incomplete; refusing to overwrite"}
+        return {
+            **before,
+            "status": "repair_required",
+            "detail": "managed version is incomplete; refusing to overwrite",
+        }
     base = _dependency_base(home, manifest)
     base.mkdir(parents=True, exist_ok=True)
     lock_path = base / dependency["tested_version"]
     with _file_lock(lock_path):
-        before = dependency_status(home, manifest_path=manifest_path, system=system, machine=machine)
+        before = dependency_status(
+            home, manifest_path=manifest_path, system=system, machine=machine
+        )
         if before["status"] == "current":
             return before
         if version_root.exists():
-            return {**before, "status": "repair_required", "detail": "managed version is incomplete; refusing to overwrite"}
-        stage = Path(tempfile.mkdtemp(prefix=f".{dependency['tested_version']}.", dir=base))
+            return {
+                **before,
+                "status": "repair_required",
+                "detail": "managed version is incomplete; refusing to overwrite",
+            }
+        stage = Path(
+            tempfile.mkdtemp(prefix=f".{dependency['tested_version']}.", dir=base)
+        )
         try:
             asset_url = (
                 dependency["release_base_url"].rstrip("/")
-                + "/v" + dependency["tested_version"]
-                + "/" + platform_item["asset"]
+                + "/v"
+                + dependency["tested_version"]
+                + "/"
+                + platform_item["asset"]
             )
             allowed_hosts = {urlparse(dependency["release_base_url"]).hostname or ""}
             if "github.com" in allowed_hosts:
-                allowed_hosts.update({"release-assets.githubusercontent.com", "objects.githubusercontent.com"})
+                allowed_hosts.update(
+                    {
+                        "release-assets.githubusercontent.com",
+                        "objects.githubusercontent.com",
+                    }
+                )
             payload = download(asset_url, allowed_hosts, DONSETCH_DOWNLOAD_LIMIT_BYTES)
             if hashlib.sha256(payload).hexdigest() != platform_item["sha256"]:
                 raise ValueError("dependency checksum mismatch")
@@ -1006,14 +1257,20 @@ def ensure_dependency(
             if isinstance(error, (KeyboardInterrupt, SystemExit)):
                 raise
             return {**before, "status": "error", "detail": _redact_text(str(error))}
-    return dependency_status(home, manifest_path=manifest_path, system=system, machine=machine)
+    return dependency_status(
+        home, manifest_path=manifest_path, system=system, machine=machine
+    )
 
 
 def _content_text(payload: Any) -> str:
     if isinstance(payload, str):
         return payload.strip()
     if isinstance(payload, dict):
-        values = [_content_text(value) for key, value in payload.items() if key in {"content", "text", "markdown", "body", "structuredContent"}]
+        values = [
+            _content_text(value)
+            for key, value in payload.items()
+            if key in {"content", "text", "markdown", "body", "structuredContent"}
+        ]
         return "\n".join(value for value in values if value).strip()
     if isinstance(payload, list):
         return "\n".join(_content_text(value) for value in payload).strip()
@@ -1032,56 +1289,160 @@ def donsetch_fetch(
     """Read one validated public URL through the managed binary with JSON-only stdout."""
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        return {"status": "error", "content_ok": False, "detail": "invalid fetch URL", "stderr_category": "", "data": {}}
+        return {
+            "status": "error",
+            "content_ok": False,
+            "detail": "invalid fetch URL",
+            "stderr_category": "",
+            "data": {},
+        }
     normalized_focus = ""
     if focus is not None:
         if not isinstance(focus, str) or not focus.strip() or len(focus.strip()) > 200:
-            return {"status": "error", "content_ok": False, "detail": "invalid fetch focus", "stderr_category": "", "data": {}}
+            return {
+                "status": "error",
+                "content_ok": False,
+                "detail": "invalid fetch focus",
+                "stderr_category": "",
+                "data": {},
+            }
         normalized_focus = focus.strip()
     status = dependency_status(home, manifest_path=manifest_path)
     if status["status"] not in {"current", "update_available"}:
-        return {"status": "unavailable", "content_ok": False, "detail": "managed dependency is unavailable", "stderr_category": "", "data": {}}
-    command = [status["path"], "fetch", url, "--json", "--deadline-ms", "15000", "--max-chars", "50000"]
+        return {
+            "status": "unavailable",
+            "content_ok": False,
+            "detail": "managed dependency is unavailable",
+            "stderr_category": "",
+            "data": {},
+        }
+    command = [
+        status["path"],
+        "fetch",
+        url,
+        "--json",
+        "--deadline-ms",
+        "15000",
+        "--max-chars",
+        "50000",
+    ]
     if normalized_focus:
         command.extend(("--focus", normalized_focus))
     try:
-        completed = subprocess.run(command, check=False, capture_output=True, text=True, timeout=timeout, shell=False)
+        completed = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            shell=False,
+        )
     except subprocess.TimeoutExpired:
-        return {"status": "error", "content_ok": False, "detail": "fetch timed out", "stderr_category": "", "data": {}}
+        return {
+            "status": "error",
+            "content_ok": False,
+            "detail": "fetch timed out",
+            "stderr_category": "",
+            "data": {},
+        }
     except OSError:
-        return {"status": "error", "content_ok": False, "detail": "fetch could not start", "stderr_category": "", "data": {}}
+        return {
+            "status": "error",
+            "content_ok": False,
+            "detail": "fetch could not start",
+            "stderr_category": "",
+            "data": {},
+        }
     stderr_category = "present" if completed.stderr.strip() else ""
     try:
         data = json.loads(completed.stdout)
     except json.JSONDecodeError:
-        detail = "fetch command failed" if completed.returncode != 0 else "fetch returned invalid JSON"
-        return {"status": "error", "content_ok": False, "detail": detail, "stderr_category": stderr_category, "data": {}}
+        detail = (
+            "fetch command failed"
+            if completed.returncode != 0
+            else "fetch returned invalid JSON"
+        )
+        return {
+            "status": "error",
+            "content_ok": False,
+            "detail": detail,
+            "stderr_category": stderr_category,
+            "data": {},
+        }
     if not isinstance(data, dict):
-        return {"status": "error", "content_ok": False, "detail": "fetch returned invalid JSON envelope", "stderr_category": stderr_category, "data": {}}
+        return {
+            "status": "error",
+            "content_ok": False,
+            "detail": "fetch returned invalid JSON envelope",
+            "stderr_category": stderr_category,
+            "data": {},
+        }
     error_value = data.get("error")
     error_kind = ""
     if isinstance(error_value, dict) and isinstance(error_value.get("kind"), str):
         error_kind = error_value["kind"]
     if data.get("ok") is not True:
         meta_value = data.get("meta")
-        error_code = meta_value.get("code", "") if isinstance(meta_value, dict) and isinstance(meta_value.get("code"), str) else ""
-        detail = f"fetch returned error: {error_kind}" if error_kind else "fetch returned an error"
-        blocked = error_kind.casefold() in {"blocked", "walled", "captcha"} or error_code.casefold().startswith(("wall.", "captcha"))
-        return {"status": "blocked" if blocked else "error", "content_ok": False, "detail": detail, "stderr_category": stderr_category, "data": data, "error_kind": error_kind, "error_code": error_code}
+        error_code = (
+            meta_value.get("code", "")
+            if isinstance(meta_value, dict) and isinstance(meta_value.get("code"), str)
+            else ""
+        )
+        detail = (
+            f"fetch returned error: {error_kind}"
+            if error_kind
+            else "fetch returned an error"
+        )
+        blocked = error_kind.casefold() in {
+            "blocked",
+            "walled",
+            "captcha",
+        } or error_code.casefold().startswith(("wall.", "captcha"))
+        return {
+            "status": "blocked" if blocked else "error",
+            "content_ok": False,
+            "detail": detail,
+            "stderr_category": stderr_category,
+            "data": data,
+            "error_kind": error_kind,
+            "error_code": error_code,
+        }
     if completed.returncode != 0:
-        return {"status": "error", "content_ok": False, "detail": "fetch command failed", "stderr_category": stderr_category, "data": data}
+        return {
+            "status": "error",
+            "content_ok": False,
+            "detail": "fetch command failed",
+            "stderr_category": stderr_category,
+            "data": data,
+        }
     meta = data.get("meta")
     if not isinstance(meta, dict) or meta.get("content_ok") is not True:
-        return {"status": "partial", "content_ok": False, "detail": "fetch did not confirm content", "stderr_category": stderr_category, "data": data}
+        return {
+            "status": "partial",
+            "content_ok": False,
+            "detail": "fetch did not confirm content",
+            "stderr_category": stderr_category,
+            "data": data,
+        }
     content = data.get("content")
     if not isinstance(content, str):
         content = ""
     content = content.strip()
     if not content:
-        return {"status": "partial", "content_ok": True, "detail": "fetch content is empty", "stderr_category": stderr_category, "data": data}
+        return {
+            "status": "partial",
+            "content_ok": True,
+            "detail": "fetch content is empty",
+            "stderr_category": stderr_category,
+            "data": data,
+        }
     missing = [
-        field for field in required_fields
-        if not _content_text(meta.get(field)) and field.casefold() not in content.casefold()
+        field
+        for field in required_fields
+        if not _content_text(meta.get(field))
+        and field.casefold() not in content.casefold()
     ]
     next_offset = meta.get("next_offset")
     truncated = bool(meta.get("truncated")) or next_offset is not None
@@ -1089,12 +1450,18 @@ def donsetch_fetch(
     thin_content = bool(meta.get("thin"))
     incomplete = bool(truncated or thin_content or missing)
     return {
-        "status": "partial" if incomplete else "ok", "content_ok": True,
+        "status": "partial" if incomplete else "ok",
+        "content_ok": True,
         "detail": "required content is incomplete" if incomplete else "",
-        "stderr_category": stderr_category, "data": data,
-        "quality": meta.get("quality"), "via": meta.get("via"),
-        "escalation": meta.get("escalation"), "truncated": truncated,
-        "pagination": pagination, "thin_content": thin_content, "elapsed_ms": meta.get("ms"),
+        "stderr_category": stderr_category,
+        "data": data,
+        "quality": meta.get("quality"),
+        "via": meta.get("via"),
+        "escalation": meta.get("escalation"),
+        "truncated": truncated,
+        "pagination": pagination,
+        "thin_content": thin_content,
+        "elapsed_ms": meta.get("ms"),
         "next_offset": next_offset,
     }
 
@@ -1121,7 +1488,10 @@ def _doctor_version_command(executable: str, argv: tuple[str, ...]) -> tuple[str
     """Build a fixed-argument, shell-free doctor version command."""
     resolved_executable = os.path.realpath(executable)
     version_args = argv[1:]
-    if os.name != "nt" or os.path.splitext(resolved_executable)[1].casefold() not in {".bat", ".cmd"}:
+    if os.name != "nt" or os.path.splitext(resolved_executable)[1].casefold() not in {
+        ".bat",
+        ".cmd",
+    }:
         return (resolved_executable, *version_args)
     comspec = os.environ.get("COMSPEC")
     if not comspec:
@@ -1143,7 +1513,12 @@ def _global_donsetch_detail(timeout: float) -> str:
     try:
         completed = subprocess.run(
             _doctor_version_command(executable, (DONSETCH_ID, "--version")),
-            check=False, capture_output=True, text=True, timeout=timeout,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
         )
     except (OSError, subprocess.TimeoutExpired):
         return "global command is broken and ignored"
@@ -1175,6 +1550,8 @@ def run_doctor(timeout: float = 5.0, home: str | Path | None = None) -> dict[str
                 check=False,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=timeout,
             )
         except subprocess.TimeoutExpired:
@@ -1220,30 +1597,77 @@ def _timestamp(value: str) -> float:
 
 
 def kind_of(paths: list[str]) -> str:
-    """Classify repositories of instructions without penalizing release cadence."""
+    """Classify repositories without penalizing release cadence."""
     skillish = any(
-        re.fullmatch(r"(?:SKILL\.md|skills|\.claude-plugin|\.codex-plugin|commands)", path, re.I)
+        re.fullmatch(
+            r"(?:SKILL\.md|skills|\.claude-plugin|\.codex-plugin|commands)", path, re.I
+        )
         for path in paths
     )
+    mcpish = any(
+        re.fullmatch(r"(?:mcp\.json|\.mcp\.json|smithery\.yaml)", path, re.I)
+        or "mcp" in path.lower()
+        for path in paths
+    )
+    if mcpish:
+        return "mcp-server"
     ops = operational_gap(paths)
-    return "skills" if skillish and not any(ops[key] for key in ("compose", "helm", "k8s", "docker")) else "service"
+    return (
+        "skills"
+        if skillish
+        and not any(ops[key] for key in ("compose", "helm", "k8s", "docker"))
+        else "service"
+    )
 
 
-def maturity_flags(record: dict[str, Any], now: str | float | None = None) -> dict[str, bool]:
-    now_timestamp = _timestamp(now) if isinstance(now, str) else (now if now is not None else datetime.now(timezone.utc).timestamp())
+def detect_emerging_gem(record: dict[str, Any], now: str | float | None = None) -> bool:
+    """Detect high-potential young repositories that are not yet widely starred."""
+    # debt: nothing in maturity_level consumes this flag, so a young repository still caps
+    # at level B because `adopted` (stars > 500) is false. Ceiling: gems surface only through
+    # `search-catalog --gem`, never through the maturity grade. Revisit when maturity_level
+    # takes kind-specific required evidence instead of flat flag cardinality.
+    now_timestamp = (
+        _timestamp(now)
+        if isinstance(now, str)
+        else (now if now is not None else datetime.now(timezone.utc).timestamp())
+    )
+    pushed_recently = now_timestamp - _timestamp(record["pushed_at"]) < 90 * DAY_SECONDS
+    is_safe = bool(record.get("license")) and not record.get("archived", False)
+    stars = record.get("stars", 0)
+    return pushed_recently and is_safe and stars <= 500
+
+
+def maturity_flags(
+    record: dict[str, Any], now: str | float | None = None
+) -> dict[str, bool]:
+    now_timestamp = (
+        _timestamp(now)
+        if isinstance(now, str)
+        else (now if now is not None else datetime.now(timezone.utc).timestamp())
+    )
     flags = {
         "alive": now_timestamp - _timestamp(record["pushed_at"]) < 90 * DAY_SECONDS,
         "adopted": record["stars"] > 500,
-        "sustained": record["releases_12mo"] >= 2,
-        "safe": bool(record["license"]) and not record["archived"],
-        "bus": record["contributors"] >= 3,
+        "sustained": record.get("releases_12mo", 0) >= 2,
+        "safe": bool(record.get("license")) and not record.get("archived", False),
+        "bus": record.get("contributors", 0) >= 3,
     }
-    if record.get("kind") == "skills":
-        del flags["sustained"]
+    if record.get("kind") in (
+        "skills",
+        "skill",
+        "mcp-server",
+        "design-system",
+        "reference",
+    ):
+        flags.pop("sustained", None)
     return flags
 
 
 def maturity_level(flags: dict[str, bool], record: dict[str, Any]) -> str:
+    # debt: the grade is flag cardinality, so removing a flag for a kind (see maturity_flags)
+    # shifts the denominator and can move a candidate either way. Ceiling: grades are
+    # comparable only within one kind. Revisit when each kind declares its own required
+    # evidence set instead of sharing this counter.
     if record["archived"]:
         return "D"
     total = len(flags)
@@ -1266,9 +1690,17 @@ def operational_gap(paths: list[str]) -> dict[str, bool | str]:
         "helm": has(r"(?:charts?|helm)") or has(r"Chart\.ya?ml"),
         "k8s": has(r"(?:k8s|kubernetes|manifests|deploy)"),
         "docker": has(r"Dockerfile.*"),
-        "pkg": has(r"(?:package\.json|pyproject\.toml|Cargo\.toml|go\.mod|composer\.json)"),
+        "pkg": has(
+            r"(?:package\.json|pyproject\.toml|Cargo\.toml|go\.mod|composer\.json)"
+        ),
     }
-    gap = "none" if signals["compose"] or signals["helm"] else "small" if signals["docker"] or signals["pkg"] else "large"
+    gap = (
+        "none"
+        if signals["compose"] or signals["helm"]
+        else "small"
+        if signals["docker"] or signals["pkg"]
+        else "large"
+    )
     return {**signals, "gap": gap}
 
 
@@ -1279,6 +1711,8 @@ def _gh_api(path: str, *, required: bool = False) -> Any | None:
             check=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=30,
         )
     except FileNotFoundError as error:
@@ -1297,23 +1731,35 @@ def _gh_api(path: str, *, required: bool = False) -> Any | None:
         return json.loads(completed.stdout)
     except json.JSONDecodeError as error:
         if required:
-            raise RuntimeError(f"GitHub API returned invalid JSON for {path}") from error
+            raise RuntimeError(
+                f"GitHub API returned invalid JSON for {path}"
+            ) from error
         return None
 
 
 def probe_repository(slug: str, now: str | float | None = None) -> dict[str, Any]:
     canonical_slug = normalize_repo_slug(slug)
-    now_timestamp = _timestamp(now) if isinstance(now, str) else (now if now is not None else datetime.now(timezone.utc).timestamp())
+    now_timestamp = (
+        _timestamp(now)
+        if isinstance(now, str)
+        else (now if now is not None else datetime.now(timezone.utc).timestamp())
+    )
     repository = _gh_api(f"repos/{canonical_slug}", required=True)
     if not isinstance(repository, dict):
         raise RuntimeError(f"cannot read repos/{canonical_slug}")
     releases = _gh_api(f"repos/{canonical_slug}/releases?per_page=100")
     contributors = _gh_api(f"repos/{canonical_slug}/contributors?per_page=10")
-    root = _gh_api(f"repos/{canonical_slug}/contents?ref={repository['default_branch']}")
+    root = _gh_api(
+        f"repos/{canonical_slug}/contents?ref={repository['default_branch']}"
+    )
     release_items = releases if isinstance(releases, list) else []
     contributor_items = contributors if isinstance(contributors, list) else []
     root_items = root if isinstance(root, list) else []
-    paths = [item["name"] for item in root_items if isinstance(item, dict) and isinstance(item.get("name"), str)]
+    paths = [
+        item["name"]
+        for item in root_items
+        if isinstance(item, dict) and isinstance(item.get("name"), str)
+    ]
     record: dict[str, Any] = {
         "slug": canonical_slug,
         "kind": kind_of(paths),
@@ -1325,8 +1771,11 @@ def probe_repository(slug: str, now: str | float | None = None) -> dict[str, Any
             1
             for release in release_items
             if isinstance(release, dict)
-            and isinstance(release.get("published_at") or release.get("created_at"), str)
-            and now_timestamp - _timestamp(release.get("published_at") or release["created_at"])
+            and isinstance(
+                release.get("published_at") or release.get("created_at"), str
+            )
+            and now_timestamp
+            - _timestamp(release.get("published_at") or release["created_at"])
             < 365 * DAY_SECONDS
         ),
         "contributors": len(contributor_items),
@@ -1335,13 +1784,21 @@ def probe_repository(slug: str, now: str | float | None = None) -> dict[str, Any
         record["license"] = None
     record["flags"] = maturity_flags(record, now_timestamp)
     record["level"] = maturity_level(record["flags"], record)
-    record["ops"] = {"gap": "n/a"} if record["kind"] == "skills" else operational_gap(paths)
+    record["emerging_gem"] = detect_emerging_gem(record, now_timestamp)
+    record["ops"] = (
+        {"gap": "n/a"}
+        if record["kind"]
+        in ("skills", "skill", "mcp-server", "design-system", "reference")
+        else operational_gap(paths)
+    )
     return record
 
 
 def _maturity_cache_path(home: str | Path | None = None) -> Path:
     root = _resolved_root(wheel_home(home))
-    return _contained_path(root, Path("cache") / "maturity.json", "cache path escapes WHEEL_HOME")
+    return _contained_path(
+        root, Path("cache") / "maturity.json", "cache path escapes WHEEL_HOME"
+    )
 
 
 def load_maturity_cache(home: str | Path | None = None) -> dict[str, dict[str, Any]]:
@@ -1359,14 +1816,18 @@ def _load_maturity_cache_path(path: Path) -> dict[str, dict[str, Any]]:
     return cache
 
 
-def save_maturity_cache(cache: dict[str, dict[str, Any]], home: str | Path | None = None) -> Path:
+def save_maturity_cache(
+    cache: dict[str, dict[str, Any]], home: str | Path | None = None
+) -> Path:
     path = _maturity_cache_path(home)
     with _file_lock(path):
         _atomic_json_write(path, cache)
     return path
 
 
-def maturity_for(slugs: list[str], home: str | Path | None = None) -> list[dict[str, Any]]:
+def maturity_for(
+    slugs: list[str], home: str | Path | None = None
+) -> list[dict[str, Any]]:
     now_timestamp = datetime.now(timezone.utc).timestamp()
     path = _maturity_cache_path(home)
     with _file_lock(path):
@@ -1375,12 +1836,164 @@ def maturity_for(slugs: list[str], home: str | Path | None = None) -> list[dict[
         for slug in slugs:
             canonical_slug = normalize_repo_slug(slug)
             entry = cache.get(canonical_slug)
-            if entry is None or now_timestamp - _timestamp(entry["checked_at"]) >= MATURITY_CACHE_TTL_SECONDS:
-                entry = {**probe_repository(canonical_slug, now_timestamp), "checked_at": _utc_now()}
+            if (
+                entry is None
+                or now_timestamp - _timestamp(entry["checked_at"])
+                >= MATURITY_CACHE_TTL_SECONDS
+            ):
+                entry = {
+                    **probe_repository(canonical_slug, now_timestamp),
+                    "checked_at": _utc_now(),
+                }
                 cache[canonical_slug] = entry
             result.append(entry)
         _atomic_json_write(path, cache)
     return result
+
+
+WHEEL_CATALOG_EDGE_URL_ENV = "WHEEL_CATALOG_EDGE_URL"
+DEFAULT_CATALOG_EDGE_URL = (
+    "https://cdn.jsdelivr.net/gh/kalpakprod/wheel@data/catalog.jsonl"
+)
+DEFAULT_CATALOG_FALLBACK_URL = (
+    "https://raw.githubusercontent.com/kalpakprod/wheel/data/catalog.jsonl"
+)
+CATALOG_MAX_BYTES = 32 * 1024 * 1024
+CATALOG_STALE_DAYS = 7
+CATALOG_DEFAULT_HOSTS: frozenset[str] = frozenset(
+    {"cdn.jsdelivr.net", "raw.githubusercontent.com"}
+)
+
+
+def _catalog_candidate_urls(
+    edge_url: str | None = None,
+    fallback_url: str | None = None,
+) -> list[str]:
+    explicit = [url for url in (edge_url, fallback_url) if url]
+    if explicit:
+        return explicit
+    candidates: list[str] = []
+    env_edge = os.environ.get(WHEEL_CATALOG_EDGE_URL_ENV, "").strip()
+    if env_edge:
+        _require_catalog_url(env_edge)
+        candidates.append(env_edge)
+    candidates.append(DEFAULT_CATALOG_EDGE_URL)
+    candidates.append(DEFAULT_CATALOG_FALLBACK_URL)
+    return candidates
+
+
+CATALOG_SEARCH_FIELDS = ("slug", "display_name", "description")
+
+
+def _catalog_cache_path(home: str | Path | None = None) -> Path:
+    root = _resolved_root(wheel_home(home))
+    return _contained_path(
+        root, Path("cache") / "catalog.jsonl", "catalog cache path escapes WHEEL_HOME"
+    )
+
+
+def _parse_catalog_payload(content: str) -> list[dict[str, Any]]:
+    """Parse a JSONL catalog payload, rejecting any malformed or non-object line."""
+    items: list[dict[str, Any]] = []
+    for number, line in enumerate(content.splitlines(), start=1):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError as error:
+            raise ValueError(f"catalog line {number} is not valid JSON") from error
+        if not isinstance(item, dict):
+            raise ValueError(f"catalog line {number} is not a JSON object")
+        items.append(item)
+    return items
+
+
+def load_catalog(home: str | Path | None = None) -> list[dict[str, Any]]:
+    path = _catalog_cache_path(home)
+    if not path.exists():
+        return []
+    try:
+        return _parse_catalog_payload(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError):
+        return []
+
+
+def _require_catalog_url(url: str) -> str:
+    """Reject anything a redirect could downgrade; the catalog is fetched over HTTPS only."""
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not parsed.hostname:
+        raise ValueError(f"catalog url must be https with a host: {url}")
+    return url
+
+
+def _catalog_allowed_hosts(urls: Sequence[str]) -> set[str]:
+    """Authorize the built-in origins plus any origin the caller named explicitly."""
+    hosts = set(CATALOG_DEFAULT_HOSTS)
+    for url in urls:
+        hostname = urlparse(url).hostname
+        if hostname:
+            hosts.add(hostname)
+    return hosts
+
+
+def _fetch_catalog_payload(url: str, allowed_hosts: set[str]) -> str:
+    """Fetch through the shared bounded downloader: allowlisted HTTPS, no redirect downgrade."""
+    return _bounded_https_download(url, allowed_hosts, CATALOG_MAX_BYTES).decode(
+        "utf-8"
+    )
+
+
+def sync_catalog(
+    home: str | Path | None = None,
+    edge_url: str | None = None,
+    fallback_url: str | None = None,
+) -> dict[str, Any]:
+    """Refresh the local catalog cache, never replacing a valid cache with a bad payload."""
+    path = _catalog_cache_path(home)
+    urls = _catalog_candidate_urls(edge_url, fallback_url)
+    urls = [_require_catalog_url(url) for url in dict.fromkeys(urls)]
+    allowed_hosts = _catalog_allowed_hosts(urls)
+
+    errors: list[str] = []
+    fetched: list[dict[str, Any]] | None = None
+    content: str | None = None
+    used_url: str | None = None
+    for url in urls:
+        try:
+            payload = _fetch_catalog_payload(url, allowed_hosts)
+            parsed = _parse_catalog_payload(payload)
+        except (
+            urllib_error.URLError,
+            http.client.HTTPException,
+            OSError,
+            UnicodeDecodeError,
+            ValueError,
+        ) as error:
+            errors.append(f"{url}: {error}")
+            continue
+        if not parsed:
+            errors.append(f"{url}: catalog is empty")
+            continue
+        content, fetched, used_url = payload, parsed, url
+        break
+
+    if content is not None and fetched:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with _file_lock(path):
+            _atomic_text_write(path, content)
+        return {"status": "ok", "source": used_url, "count": len(fetched), "error": ""}
+
+    items = load_catalog(home)
+    detail = "; ".join(errors)
+    if items:
+        return {
+            "status": "cached",
+            "source": "local_cache",
+            "count": len(items),
+            "error": detail,
+        }
+    return {"status": "unavailable", "source": None, "count": 0, "error": detail}
 
 
 DECISION_LIST_FIELDS: tuple[tuple[str, str], ...] = (
@@ -1407,6 +2020,108 @@ DECISION_REQUIRED_FIELDS: frozenset[str] = frozenset(
         *(field for _, field in DECISION_LIST_FIELDS),
     }
 )
+
+
+def catalog_age_days(
+    records: list[dict[str, Any]], now: str | float | None = None
+) -> float | None:
+    """Return the age of the freshest record in days, or None when unknown."""
+    now_timestamp = (
+        _timestamp(now)
+        if isinstance(now, str)
+        else (now if now is not None else datetime.now(timezone.utc).timestamp())
+    )
+    newest: float | None = None
+    for record in records:
+        checked_at = record.get("checked_at")
+        if not isinstance(checked_at, str):
+            continue
+        try:
+            stamp = _timestamp(checked_at)
+        except ValueError:
+            continue
+        if newest is None or stamp > newest:
+            newest = stamp
+    if newest is None:
+        return None
+    return max(0.0, round((now_timestamp - newest) / DAY_SECONDS, 2))
+
+
+def _catalog_matches(record: dict[str, Any], needle: str) -> bool:
+    for field_name in CATALOG_SEARCH_FIELDS:
+        value = record.get(field_name)
+        if isinstance(value, str) and needle in value.casefold():
+            return True
+    topics = record.get("topics")
+    if isinstance(topics, list):
+        return any(
+            isinstance(topic, str) and needle in topic.casefold() for topic in topics
+        )
+    return False
+
+
+def search_catalog(
+    query: str | None = None,
+    kind: str | None = None,
+    capability: str | None = None,
+    gem_only: bool = False,
+    moving_only: bool = False,
+    limit: int = 20,
+    home: str | Path | None = None,
+) -> dict[str, Any]:
+    """Query the offline catalog cache without loading it into a model's context."""
+    if limit < 1:
+        raise ValueError("limit must be a positive integer")
+    if kind is not None and kind not in CANDIDATE_KINDS:
+        raise ValueError(f"unknown candidate kind: {kind}")
+    # debt: every call reparses the whole JSONL cache; at the 400-record cap that is ~200 KB
+    # per query and the agent issues several per run. Ceiling: fine while the cap holds.
+    # Revisit when the cap rises or the catalog merges with the maturity cache, then index it
+    # with stdlib sqlite3 on sync and query that.
+    records = load_catalog(home)
+    age_days = catalog_age_days(records)
+    needle = query.casefold() if isinstance(query, str) and query.strip() else None
+
+    matches = [
+        record
+        for record in records
+        if (kind is None or record.get("kind") == kind)
+        and (capability is None or record.get("capability") == capability)
+        and (not gem_only or bool(record.get("emerging_gem")))
+        and (not moving_only or record.get("stars_per_day") is not None)
+        and (needle is None or _catalog_matches(record, needle))
+    ]
+    if moving_only:
+        matches.sort(
+            key=lambda record: (
+                -float(record.get("stars_per_day") or 0.0),
+                str(record.get("slug", "")),
+            )
+        )
+    else:
+        matches.sort(
+            key=lambda record: (
+                -int(record.get("stars") or 0),
+                str(record.get("slug", "")),
+            )
+        )
+    return {
+        "catalog_records": len(records),
+        "age_days": age_days,
+        "stale": age_days is None or age_days > CATALOG_STALE_DAYS,
+        "with_momentum": sum(
+            1 for record in records if record.get("stars_per_day") is not None
+        ),
+        "matched": len(matches),
+        "truncated": len(matches) > limit,
+        "matches": matches[:limit],
+    }
+
+
+DECISION_EXPERT_FIELDS: frozenset[str] = frozenset(
+    {"explicit_sacrifice", "tradeoff_matrix", "code_comparison", "evidence_gaps"}
+)
+DECISION_SCHEMAS: frozenset[str] = frozenset({"legacy", "expert"})
 DECISION_COVERAGE: frozenset[str] = frozenset({"COMPLETE", "PARTIAL"})
 DECISION_MODES: frozenset[str] = frozenset(
     {"deploy", "package", "compose", "extend-core", "hard-fork", "assemble"}
@@ -1453,7 +2168,9 @@ def _reject_run_secrets(value: Any) -> None:
 def _decision_slug(decision: dict[str, Any]) -> str:
     explicit = decision.get("slug")
     if explicit is not None:
-        if not isinstance(explicit, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,79}", explicit):
+        if not isinstance(explicit, str) or not re.fullmatch(
+            r"[a-z0-9][a-z0-9-]{0,79}", explicit
+        ):
             raise ValueError("invalid decision slug")
         slug = explicit
     else:
@@ -1472,12 +2189,90 @@ def _decision_slug(decision: dict[str, Any]) -> str:
     return slug
 
 
+TRADEOFF_MATRIX_COLUMNS: tuple[str, ...] = (
+    "axis",
+    "candidate",
+    "alternative",
+    "assessment",
+)
+
+
+def decision_schema(decision: dict[str, Any]) -> str:
+    """Return the decision schema, defaulting to expert when any expert field is present."""
+    present = DECISION_EXPERT_FIELDS.intersection(decision)
+    declared = decision.get("schema")
+    if declared is None:
+        return "expert" if present else "legacy"
+    if declared not in DECISION_SCHEMAS:
+        raise ValueError("decision schema must be legacy or expert")
+    if declared == "legacy" and present:
+        raise ValueError(
+            f"legacy decision cannot carry expert fields: {', '.join(sorted(present))}"
+        )
+    return declared
+
+
+def _decision_table_cell(value: Any, field_name: str) -> str:
+    """Return a single-line Markdown table cell, escaping the column separator."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name} must be a non-empty string")
+    if "\n" in value or "\r" in value:
+        raise ValueError(f"{field_name} must be single-line")
+    return value.replace("\\", "\\\\").replace("|", "\\|")
+
+
+def _escape_markdown_label(value: str) -> str:
+    """Escape a Markdown link label so a verdict cannot break INDEX.md."""
+    return re.sub(r"([\\\[\]])", r"\\\1", value)
+
+
+EVIDENCE_GAP_KEYS: tuple[str, ...] = ("source", "reason")
+
+
+def _decision_evidence_gaps(value: Any) -> list[dict[str, str]]:
+    """Validate the sources that returned nothing, and why.
+
+    An expert decision has to state which sources it consulted and got silence
+    from. A missing key would let a run that gathered nothing read exactly like a
+    run where every platform answered and found no complaints, which is the one
+    confusion this plugin exists to prevent. An empty list is allowed, and it is a
+    claim: every source answered.
+    """
+    if not isinstance(value, list):
+        raise ValueError("evidence_gaps must be a list")
+    gaps: list[dict[str, str]] = []
+    for entry in value:
+        if not isinstance(entry, dict):
+            raise ValueError("evidence_gaps entries must be objects")
+        missing = [key for key in EVIDENCE_GAP_KEYS if key not in entry]
+        if missing:
+            raise ValueError(
+                f"evidence_gaps entry missing fields: {', '.join(missing)}"
+            )
+        cleaned: dict[str, str] = {}
+        for key in EVIDENCE_GAP_KEYS:
+            text = entry[key]
+            if not isinstance(text, str) or not text.strip():
+                raise ValueError(f"evidence_gaps {key} must be a non-empty string")
+            if "\n" in text or "\r" in text:
+                raise ValueError(f"evidence_gaps {key} must be single-line")
+            cleaned[key] = text.strip()
+        gaps.append(cleaned)
+    return gaps
+
+
 def render_decision(decision: dict[str, Any]) -> str:
     """Render the accepted verdict as stable, complete Markdown."""
     _reject_decision_secrets(decision)
     missing = DECISION_REQUIRED_FIELDS.difference(decision)
     if missing:
         raise ValueError(f"decision missing fields: {', '.join(sorted(missing))}")
+    if decision_schema(decision) == "expert":
+        missing_expert = DECISION_EXPERT_FIELDS.difference(decision)
+        if missing_expert:
+            raise ValueError(
+                f"expert decision missing fields: {', '.join(sorted(missing_expert))}"
+            )
     if decision["accepted"] is not True:
         raise ValueError("decision must be explicitly accepted before recording")
     scalar_fields = (
@@ -1491,7 +2286,10 @@ def render_decision(decision: dict[str, Any]) -> str:
         "core",
         "upstream_or_fork",
     )
-    if not all(isinstance(decision[field], str) and decision[field].strip() for field in scalar_fields):
+    if not all(
+        isinstance(decision[field], str) and decision[field].strip()
+        for field in scalar_fields
+    ):
         raise ValueError("decision scalar fields must be non-empty strings")
     if decision["coverage"] not in DECISION_COVERAGE:
         raise ValueError("invalid decision coverage")
@@ -1501,7 +2299,10 @@ def render_decision(decision: dict[str, Any]) -> str:
         raise ValueError("invalid decision maturity")
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", decision["date"]):
         raise ValueError("decision date must use YYYY-MM-DD")
-    if any("\n" in decision[field] or "\r" in decision[field] for field in ("verdict", "picked", "maturity", "date")):
+    if any(
+        "\n" in decision[field] or "\r" in decision[field]
+        for field in ("verdict", "picked", "maturity", "date")
+    ):
         raise ValueError("decision front matter values must be single-line")
     candidates = _decision_list(decision["candidates"], "candidates")
     slug = _decision_slug(decision)
@@ -1544,6 +2345,51 @@ def render_decision(decision: dict[str, Any]) -> str:
         values = _decision_list(decision[field], field)
         sections.extend(["", f"## {heading}"])
         sections.extend([f"- {value}" for value in values] or ["- None"])
+    if "explicit_sacrifice" in decision:
+        sacrifices = _decision_list(
+            decision["explicit_sacrifice"], "explicit_sacrifice"
+        )
+        if not sacrifices:
+            raise ValueError("explicit_sacrifice must not be empty when present")
+        sections.extend(["", "## Explicit sacrifice"])
+        sections.extend([f"- {value}" for value in sacrifices])
+    if "tradeoff_matrix" in decision:
+        rows = decision["tradeoff_matrix"]
+        if not isinstance(rows, list) or not rows:
+            raise ValueError("tradeoff_matrix must be a non-empty list of objects")
+        sections.extend(
+            [
+                "",
+                "## Tradeoff matrix",
+                "| Axis | Candidate | Alternative | Assessment |",
+                "| --- | --- | --- | --- |",
+            ]
+        )
+        for row in rows:
+            if not isinstance(row, dict):
+                raise ValueError("tradeoff_matrix rows must be objects")
+            missing_cells = set(TRADEOFF_MATRIX_COLUMNS).difference(row)
+            if missing_cells:
+                raise ValueError(
+                    f"tradeoff_matrix row missing fields: {', '.join(sorted(missing_cells))}"
+                )
+            cells = [
+                _decision_table_cell(row[column], f"tradeoff_matrix.{column}")
+                for column in TRADEOFF_MATRIX_COLUMNS
+            ]
+            sections.append("| " + " | ".join(cells) + " |")
+    if "code_comparison" in decision:
+        snippet = decision["code_comparison"]
+        if not isinstance(snippet, str) or not snippet.strip():
+            raise ValueError("code_comparison must be a non-empty string")
+        sections.extend(["", "## Code comparison", snippet])
+    if "evidence_gaps" in decision:
+        gaps = _decision_evidence_gaps(decision["evidence_gaps"])
+        sections.extend(["", "## Evidence gaps"])
+        sections.extend(
+            [f"- {gap['source']}: {gap['reason']}" for gap in gaps]
+            or ["- None. Every source consulted answered."]
+        )
     return "\n".join(sections) + "\n"
 
 
@@ -1561,7 +2407,8 @@ def _render_decision_index(directory: Path) -> str:
     records = sorted(path for path in directory.glob("*.md") if path.name != "INDEX.md")
     lines = ["# Wheel decisions", ""]
     lines.extend(
-        f"- [{_front_matter_value(record, 'verdict')}]({record.name})" for record in records
+        f"- [{_escape_markdown_label(_front_matter_value(record, 'verdict'))}]({record.name})"
+        for record in records
     )
     return "\n".join(lines) + "\n"
 
@@ -1666,18 +2513,27 @@ def _validate_run_update(update: Any) -> dict[str, Any]:
     if "context" in update:
         validated["context"] = _require_json_object(update["context"], "context")
     if "families" in update:
-        validated["families"] = _require_json_object_list(update["families"], "families")
+        validated["families"] = _require_json_object_list(
+            update["families"], "families"
+        )
     if "user_answers" in update:
-        validated["user_answers"] = _require_json_object_list(update["user_answers"], "user_answers")
+        validated["user_answers"] = _require_json_object_list(
+            update["user_answers"], "user_answers"
+        )
     if "tool_snapshot" in update:
-        validated["tool_snapshot"] = _require_json_object(update["tool_snapshot"], "tool_snapshot")
+        validated["tool_snapshot"] = _require_json_object(
+            update["tool_snapshot"], "tool_snapshot"
+        )
     if "candidates" in update:
         raw_candidates = _require_json_object(update["candidates"], "candidates")
         candidates: dict[str, Candidate] = {}
         for candidate_id, raw_candidate in raw_candidates.items():
             candidate_kind, canonical_id = normalize_candidate_id(candidate_id)
             candidate = _candidate_from_dict(raw_candidate)
-            if candidate.candidate_id != canonical_id or candidate.kind != candidate_kind:
+            if (
+                candidate.candidate_id != canonical_id
+                or candidate.kind != candidate_kind
+            ):
                 raise ValueError("candidate id must match its canonical map key")
             candidates[canonical_id] = candidate
         validated["candidates"] = candidates
@@ -1698,6 +2554,39 @@ def _load_json_object(path: str, message: str) -> dict[str, Any]:
 
 def _add_home_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--home", help="WHEEL_HOME override")
+
+
+def _sibling_module(name: str) -> Any:
+    """Import a module that lives beside this file, however wheel.py was invoked.
+
+    `python scripts/wheel.py` puts scripts/ on sys.path but not the repository root,
+    so `import scripts.hard_metrics` raises ModuleNotFoundError for exactly the
+    invocation the README documents. The package import is still tried first, so a
+    caller that already imported `scripts.<name>` gets that same module object back
+    rather than a second copy under another name. Loading by file path is the
+    fallback that makes the documented invocation work.
+    """
+    package = f"scripts.{name}"
+    module = sys.modules.get(package)
+    if module is not None:
+        return module
+    try:
+        return importlib.import_module(package)
+    except ImportError:
+        pass
+    cached = sys.modules.get(f"_wheel_sibling_{name}")
+    if cached is not None:
+        return cached
+    path = Path(__file__).resolve().parent / f"{name}.py"
+    if not path.exists():
+        raise RuntimeError(f"missing companion module: {path.name}")
+    spec = importlib.util.spec_from_file_location(f"_wheel_sibling_{name}", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load companion module: {path.name}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def _json_output(value: Any) -> None:
@@ -1741,12 +2630,48 @@ def build_parser() -> argparse.ArgumentParser:
     dependencies.add_argument("--json", action="store_true", dest="as_json")
     _add_home_argument(dependencies)
 
+    sync_cat = commands.add_parser("sync-catalog")
+    sync_cat.add_argument("--edge-url")
+    sync_cat.add_argument("--fallback-url")
+    sync_cat.add_argument("--json", action="store_true", dest="as_json")
+    _add_home_argument(sync_cat)
+
+    search_cat = commands.add_parser("search-catalog")
+    search_cat.add_argument("--query")
+    search_cat.add_argument("--kind", choices=sorted(CANDIDATE_KINDS))
+    search_cat.add_argument("--capability")
+    search_cat.add_argument("--gem", action="store_true")
+    search_cat.add_argument("--moving", action="store_true")
+    search_cat.add_argument("--limit", type=int, default=20)
+    search_cat.add_argument("--json", action="store_true", dest="as_json")
+    _add_home_argument(search_cat)
+
     read_url = commands.add_parser("read-url")
     read_url.add_argument("url")
     read_url.add_argument("--focus")
-    read_url.add_argument("--require-field", action="append", default=[], dest="required_fields")
+    read_url.add_argument(
+        "--require-field", action="append", default=[], dest="required_fields"
+    )
     read_url.add_argument("--json", action="store_true", dest="as_json")
     _add_home_argument(read_url)
+
+    comm_sig = commands.add_parser("community-signals")
+    comm_sig.add_argument("--slug", required=True, help="Repository slug (owner/repo)")
+    comm_sig.add_argument(
+        "--limit",
+        type=int,
+        default=25,
+        help="Maximum matches per source (default 25)",
+    )
+    comm_sig.add_argument("--json", action="store_true", dest="as_json")
+
+    dep_debt = commands.add_parser("dependency-debt")
+    dep_debt.add_argument("--slug", required=True, help="Repository slug (owner/repo)")
+    dep_debt.add_argument("--json", action="store_true", dest="as_json")
+
+    hard_met = commands.add_parser("hard-metrics")
+    hard_met.add_argument("--slug", required=True, help="Repository slug (owner/repo)")
+    hard_met.add_argument("--json", action="store_true", dest="as_json")
 
     maturity = commands.add_parser("maturity")
     maturity.add_argument("slugs", nargs="+")
@@ -1761,13 +2686,34 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _force_utf8_streams() -> None:
+    """Emit UTF-8 whatever the console codepage is.
+
+    On a non-UTF-8 Windows console `print` encodes with the active codepage, so a
+    repository title carrying an em dash or an emoji either raises or lands in the
+    output as mojibake. `--json` exists to be parsed by another program; output that
+    is not valid UTF-8 is not parseable, so the streams are pinned here rather than
+    at every call site.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (ValueError, OSError):
+                pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _force_utf8_streams()
     args = build_parser().parse_args(argv)
     if args.command == "init-run":
         record = RunStore(args.home).create(args.task)
         print(RunStore(args.home)._run_path(record.run_id))
     elif args.command == "add-source":
-        record = RunStore(args.home).add_source_result(args.run_id, _source_result_from_input(args.input))
+        record = RunStore(args.home).add_source_result(
+            args.run_id, _source_result_from_input(args.input)
+        )
         _json_output(record.to_dict())
     elif args.command == "transition":
         record = RunStore(args.home).transition(args.run_id, args.to)
@@ -1776,7 +2722,8 @@ def main(argv: list[str] | None = None) -> int:
         _json_output(RunStore(args.home).load(args.run_id).to_dict())
     elif args.command == "update-run":
         record = RunStore(args.home).update(
-            args.run_id, _load_json_object(args.input, "run update input must contain an object")
+            args.run_id,
+            _load_json_object(args.input, "run update input must contain an object"),
         )
         _json_output(record.to_dict())
     elif args.command == "doctor":
@@ -1788,10 +2735,16 @@ def main(argv: list[str] | None = None) -> int:
                 version = command["version"] or command["detail"]
                 print(f"{command['name']}: {command['status']} {version}".rstrip())
     elif args.command == "dependencies":
-        report = ensure_dependency(args.home) if args.ensure else dependency_status(
-            args.home, check_latest=args.check_latest
+        report = (
+            ensure_dependency(args.home)
+            if args.ensure
+            else dependency_status(args.home, check_latest=args.check_latest)
         )
-        if args.ensure and args.check_latest and report["status"] in {"current", "update_available"}:
+        if (
+            args.ensure
+            and args.check_latest
+            and report["status"] in {"current", "update_available"}
+        ):
             report = dependency_status(args.home, check_latest=True)
         if args.as_json:
             _json_output(report)
@@ -1799,8 +2752,50 @@ def main(argv: list[str] | None = None) -> int:
             version = report["version"] or report["tested_version"]
             detail = f" {report['detail']}" if report["detail"] else ""
             print(f"{report['id']}: {report['status']} {version}{detail}".rstrip())
-        if args.ensure and report["status"] in {"error", "repair_required", "unavailable"}:
+        if args.ensure and report["status"] in {
+            "error",
+            "repair_required",
+            "unavailable",
+        }:
             return 1
+    elif args.command == "sync-catalog":
+        res = sync_catalog(
+            home=args.home, edge_url=args.edge_url, fallback_url=args.fallback_url
+        )
+        if args.as_json:
+            _json_output(res)
+        else:
+            print(
+                f"catalog: {res['status']} ({res['count']} items from {res['source']})"
+            )
+    elif args.command == "search-catalog":
+        found = search_catalog(
+            query=args.query,
+            kind=args.kind,
+            capability=args.capability,
+            gem_only=args.gem,
+            moving_only=args.moving,
+            limit=args.limit,
+            home=args.home,
+        )
+        if args.as_json:
+            _json_output(found)
+        else:
+            freshness = (
+                "unknown age"
+                if found["age_days"] is None
+                else f"{found['age_days']}d old"
+            )
+            print(
+                f"catalog: {found['catalog_records']} records ({freshness}{', STALE' if found['stale'] else ''})"
+            )
+            for record in found["matches"]:
+                gem = " gem" if record.get("emerging_gem") else ""
+                print(
+                    f"- {record.get('slug')} [{record.get('kind')}] {record.get('stars')}*{gem} {record.get('url', '')}"
+                )
+            if found["truncated"]:
+                print(f"... {found['matched'] - len(found['matches'])} more")
     elif args.command == "read-url":
         report = donsetch_fetch(
             args.url,
@@ -1813,17 +2808,96 @@ def main(argv: list[str] | None = None) -> int:
         else:
             detail = f" {report['detail']}" if report["detail"] else ""
             print(f"donsetch: {report['status']}{detail}")
+    elif args.command == "community-signals":
+        collect_regret_signals = _sibling_module(
+            "community_signals"
+        ).collect_regret_signals
+
+        payload = collect_regret_signals(args.slug, limit=args.limit)
+        if args.as_json:
+            _json_output(payload)
+        else:
+            print(f"Community regret signals for {payload.get('slug')}:")
+            print(f"  Available sources: {payload.get('available_sources', 0)}")
+            for src in payload.get("sources", []):
+                status = src.get("status", "unknown")
+                matches = src.get("matches", [])
+                print(f"  [{src.get('source')}] status={status} matches={len(matches)}")
+                for match in matches[:5]:
+                    title = match.get("title") or "(no title)"
+                    url = match.get("url") or ""
+                    print(f"    - {title} ({url})")
+    elif args.command == "dependency-debt":
+        analyze_dependency_debt = _sibling_module(
+            "dependency_debt"
+        ).analyze_dependency_debt
+
+        payload = analyze_dependency_debt(args.slug)
+        if args.as_json:
+            _json_output(payload)
+        else:
+            print(
+                f"Dependency debt for {payload.get('slug')} (status: {payload.get('status')}):"
+            )
+            print(f"  Direct dependencies: {payload.get('direct')}")
+            print(f"  Transitive dependencies: {payload.get('transitive')}")
+            print(f"  Unlicensed packages: {payload.get('unlicensed')}")
+            ecos = payload.get("ecosystems") or {}
+            if ecos:
+                print(f"  Ecosystems: {', '.join(f'{k}:{v}' for k, v in ecos.items())}")
+            for note in payload.get("notes", []):
+                print(f"  note: {note}")
+    elif args.command == "hard-metrics":
+        collect_hard_metrics = _sibling_module("hard_metrics").collect_hard_metrics
+
+        payload = collect_hard_metrics(args.slug)
+        if args.as_json:
+            _json_output(payload)
+        else:
+            print(
+                f"Hard metrics for {payload.get('slug')} (status: {payload.get('status')}):"
+            )
+            print(f"  License: {payload.get('license')}")
+            print(f"  Archived: {payload.get('archived')}")
+            print(f"  Pushed age (days): {payload.get('pushed_age_days')}")
+            bf = payload.get("bus_factor") or {}
+            print(
+                f"  Bus factor: {bf.get('bus_factor')} (contributors: {bf.get('contributors')}, HHI: {bf.get('hhi')})"
+            )
+            cc = payload.get("commit_cadence") or {}
+            print(
+                f"  Commit cadence (52w): {cc.get('commits_52w')} commits, median/wk: {cc.get('median_commits_per_week')}"
+            )
+            rc = payload.get("release_cadence") or {}
+            print(
+                f"  Release cadence: {rc.get('releases')} releases, median interval: {rc.get('median_interval_days')} days"
+            )
+            if payload.get("unavailable"):
+                print(
+                    f"  Unavailable endpoints: {', '.join(payload.get('unavailable', []))}"
+                )
     elif args.command == "maturity":
         entries = maturity_for(args.slugs, args.home)
         if args.as_json:
             _json_output(entries)
         else:
             for entry in entries:
-                enabled = " ".join(name for name, value in entry["flags"].items() if value) or "-"
-                print(f"{entry['level']}  {entry['slug']}  ★{entry['stars']}  deploy-gap:{entry['ops']['gap']}  [{enabled}]")
+                enabled = (
+                    " ".join(name for name, value in entry["flags"].items() if value)
+                    or "-"
+                )
+                print(
+                    f"{entry['level']}  {entry['slug']}  ★{entry['stars']}  deploy-gap:{entry['ops']['gap']}  [{enabled}]"
+                )
     elif args.command == "record-decision":
-        decision = _load_json_object(args.input, "decision input must contain an object")
-        print(record_decision(decision, args.scope, project_root=args.project_root, home=args.home))
+        decision = _load_json_object(
+            args.input, "decision input must contain an object"
+        )
+        print(
+            record_decision(
+                decision, args.scope, project_root=args.project_root, home=args.home
+            )
+        )
     return 0
 
 

@@ -9,13 +9,25 @@
 # Keep `skills` to what actually exists and is installable.
 
 - id: workflow-orchestration
-  triggers: [оркестрация, workflow, пайплайн, pipeline, etl, cron, планировщик, автоматизация процессов]
+  triggers:
+    [
+      оркестрация,
+      workflow,
+      пайплайн,
+      pipeline,
+      etl,
+      cron,
+      планировщик,
+      автоматизация процессов,
+    ]
   skills: []
-  search_terms: [workflow orchestration, workflow engine, data pipeline, job scheduler]
+  search_terms:
+    [workflow orchestration, workflow engine, data pipeline, job scheduler]
   topics: [workflow, orchestration, etl, scheduler]
 
 - id: web-frontend
-  triggers: [фронтенд, frontend, лендинг, landing, ui, интерфейс, сайт, дизайн страницы]
+  triggers:
+    [фронтенд, frontend, лендинг, landing, ui, интерфейс, сайт, дизайн страницы]
   skills: [frontend-design, react-best-practices, composition-patterns]
   search_terms: [ui kit, component library, admin template, landing template]
   topics: [react, ui-components, design-system]
@@ -23,7 +35,8 @@
 - id: admin-panel
   triggers: [админка, admin panel, crud, бэкофис, backoffice, internal tool]
   skills: []
-  search_terms: [admin panel, internal tool builder, crud generator, low-code admin]
+  search_terms:
+    [admin panel, internal tool builder, crud generator, low-code admin]
   topics: [admin-dashboard, low-code, crud]
 
 - id: backend-api
@@ -39,7 +52,8 @@
   topics: [database, orm, sql]
 
 - id: auth
-  triggers: [авторизация, аутентификация, auth, sso, oauth, login, пользователи, роли]
+  triggers:
+    [авторизация, аутентификация, auth, sso, oauth, login, пользователи, роли]
   skills: [identity-federation]
   search_terms: [authentication server, identity provider, sso, rbac library]
   topics: [authentication, oauth, sso, identity]
@@ -59,7 +73,8 @@
 - id: monitoring
   triggers: [мониторинг, метрики, логи, observability, алерты, дашборд статуса]
   skills: []
-  search_terms: [monitoring stack, log aggregation, metrics dashboard, uptime monitor]
+  search_terms:
+    [monitoring stack, log aggregation, metrics dashboard, uptime monitor]
   topics: [monitoring, observability, logging, metrics]
 
 - id: ci-cd
@@ -91,3 +106,112 @@
   skills: []
   search_terms: [message broker, event streaming, task queue]
   topics: [message-queue, event-streaming, pubsub]
+
+- id: mcp-servers
+  triggers:
+    [
+      mcp,
+      model context protocol,
+      mcp-сервер,
+      mcp server,
+      интеграция mcp,
+      инструмент для агента,
+    ]
+  skills: [mcp-builder]
+  search_terms: [modelcontextprotocol server, mcp server, mcp-server, mcp tool]
+  topics: [mcp, model-context-protocol, mcp-server]
+
+- id: agent-skills
+  triggers:
+    [скилл, skill, skills, agent skill, промпт-система, инструкция для агента]
+  skills: []
+  search_terms:
+    [agent skills, claude skill, prompt engineering, agent instructions]
+  topics: [agent-skills, claude-skill, prompt-engineering]
+
+- id: plugins-extensions
+  triggers: [плагин, plugin, расширение, extension, аддон, addon]
+  skills: []
+  search_terms:
+    [cli plugin, claude plugin, extensible architecture, plugin system]
+  topics: [plugin, plugin-architecture, extension]
+
+- id: design-systems
+  triggers:
+    [
+      дизайн-система,
+      design system,
+      ui kit,
+      компоненты интерфейса,
+      design tokens,
+    ]
+  skills: [frontend-design]
+  search_terms:
+    [design system, component library, tailwind ui kit, design tokens]
+  topics: [design-system, component-library, design-tokens, ui-components]
+
+- id: system-design-resources
+  triggers:
+    [
+      system design,
+      архитектура систем,
+      паттерны проектирования,
+      highload,
+      распределённые системы,
+    ]
+  skills: []
+  search_terms:
+    [
+      system design resources,
+      distributed systems patterns,
+      architecture blueprints,
+      scalable architecture,
+    ]
+  topics: [system-design, distributed-systems, software-architecture]
+
+- id: devops-deploy
+  triggers:
+    [
+      self-hosted,
+      селфхост,
+      деплой,
+      deploy,
+      docker,
+      kubernetes,
+      хостинг,
+      развернуть у себя,
+    ]
+  skills: []
+  search_terms:
+    [self-hosted alternative, docker compose stack, deployment platform, paas]
+  topics: [self-hosted, docker, kubernetes, deployment]
+
+- id: api-integration
+  triggers:
+    [
+      api,
+      интеграция,
+      integration,
+      sdk,
+      webhook,
+      сторонний сервис,
+      third-party api,
+    ]
+  skills: []
+  search_terms: [public api directory, api client library, sdk, api aggregator]
+  topics: [api, rest-api, sdk, api-client]
+
+- id: developer-tools
+  triggers:
+    [
+      инструмент разработчика,
+      developer tool,
+      cli,
+      утилита,
+      productivity tool,
+      dx,
+    ]
+  skills: []
+  search_terms:
+    [developer tools, cli tool, productivity tooling, developer experience]
+  topics: [developer-tools, cli, productivity, devtools]
