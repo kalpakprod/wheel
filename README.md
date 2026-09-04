@@ -170,6 +170,20 @@ independent.
 - `dependency-debt` returns the transitive count from GitHub's SBOM, the direct count from manifests across seven ecosystems, and the unlicensed package count. On `psf/requests` it measured 6 direct and 30 transitive. When the SBOM is unavailable the status is `partial` and `transitive` is `null`.
 - `community-signals` probes one regret phrase at a time, because a single query joining every phrase matches nothing on Algolia and is rejected outright by GitHub search. `registry/probe_terms.yaml` carries phrases for en, ru, es, pt, de, fr, zh, and ja; English is always probed, `WHEEL_PROBE_LANGS` adds more, and the total is capped at eight terms per source so the API cost cannot explode.
 - Reddit uses app-only OAuth through `WHEEL_REDDIT_CLIENT_ID` and `WHEEL_REDDIT_CLIENT_SECRET`. No user account is involved, so the plugin cannot get a user's Reddit account banned. Without credentials it falls back to the managed DonSeTch reader, and then to an honest `blocked` status.
+- The grant follows the app type registered at <https://www.reddit.com/prefs/apps>: a **script** or **web app** carries a secret and authenticates with `client_credentials`, an **installed app** carries none and authenticates with `installed_client`. Sending the wrong grant returns a bare 401, so Wheel selects it from whether a secret is set rather than guessing.
+- Reddit's [Data API Wiki](https://support.reddithelp.com/hc/en-us/articles/16160319875092-Reddit-Data-API-Wiki) mandates the agent format `<platform>:<app ID>:<version> (by /u/<username>)` and states unidentified clients are throttled or blocked. Set `WHEEL_REDDIT_USERNAME` to your handle and Wheel builds `python:com.kalpakprod.wheel:v<version> (by /u/<handle>)`; `WHEEL_REDDIT_USER_AGENT` replaces the whole string. An install that names nobody does not reach Reddit at all: the source reports `blocked` instead of sending an anonymous request.
+- The published budget is 100 queries per minute per OAuth client id. Wheel reads `x-ratelimit-remaining` and `x-ratelimit-reset` from every response and refuses the next call once fewer than five requests remain in the window, so the limit is honoured rather than discovered through a 429.
+- There is no non-OAuth path. Reading the same content through a page reader would mask how the data was obtained, which the [Responsible Builder Policy](https://support.reddithelp.com/hc/en-us/articles/42728983564564-Responsible-Builder-Policy) forbids, so an unconfigured install simply has no Reddit evidence.
+- Nothing from Reddit is written to disk. Reddit requires deleted posts to be purged from every copy held, including titles and embedded URLs, and a decision file in git cannot honour that. `scripts/wheel.py` rejects any decision or run record containing a `reddit.com` or `redd.it` link; Reddit shapes the verdict during the run and is cited as a source to re-query.
+- When Reddit itself does not answer, the `reddit-archive` lane searches [Arctic Shift](https://arctic-shift.photon-reddit.com), an independent public archive of Reddit posts. It is not Reddit's API and not a scrape of reddit.com: no credentials are sent, no Reddit account is involved and Reddit's per-client budget is untouched. The archive needs a subreddit alongside a title query, so `registry/reddit_subreddits.yaml` maps each capability to at most four subreddits; `--subreddits` overrides it. Archived `score` is the count at ingest time, so it is reported as `score_at_archive` and never used for ranking. Retention is unchanged: archive rows are Reddit content and still cannot be written into a decision.
+- Verify credentials before trusting a run:
+
+  ```bash
+  python scripts/community_signals.py --check-reddit
+  ```
+
+  It prints `ok`, `unconfigured` or `error` with the attempted grant, exits non-zero on anything but `ok`, and never echoes the credentials.
+
 - Read one dynamic page through the managed binary:
 
   ```bash

@@ -11,6 +11,74 @@ where something could not be verified, this file says so.
 
 ### Added
 
+- **`reddit-archive`, a keyless second lane.** When Reddit's API does not answer,
+  `community-signals` searches [Arctic Shift](https://arctic-shift.photon-reddit.com),
+  an independent public archive, under its own source name. No Reddit credential,
+  no Reddit budget, no account to sanction. `registry/reddit_subreddits.yaml`
+  maps capabilities to subreddits because the archive requires one alongside a
+  title query; `--subreddits` and `--capability` override it. Requests are paced
+  2.5s apart with one retry on the archive's 422 "slow down". Archived `score` is
+  reported as `score_at_archive` and excluded from ranking: it is the count at
+  ingest, not now. Verified live: 5 real threads for Kafka in r/dataengineering,
+  including one titled "Kafka deleted our data and every dashboard said we were
+  healthy". The shreddit `/svc` partials and RSS lanes used by `last30days` were
+  rejected: they read reddit.com without identifying the client, which is the
+  practice removed in this same release.
+- **The archive lane also sweeps post bodies.** Each subreddit is queried by
+  title first and by `selftext` only when the title returned nothing, so a
+  migration story written in the body is found for one extra request rather than
+  a doubling. Matches carry `matched_field` and are deduplicated by permalink.
+  Every other free route was called before being judged and is recorded in ADR
+  0013: `old.reddit.com/search.json` now answers 352 KB of HTML, `search.rss`
+  works but is an unidentified read of reddit.com, PullPush answers
+  `"This website does not provide free scraping resources for agents"`, and
+  Arctic Shift's comment search times out at any volume.
+
+### Changed
+
+- **Reddit is now read only through OAuth, and never stored.** Three rules from
+  Reddit's Data API Wiki and Responsible Builder Policy were being broken:
+  - The agent string must be `<platform>:<app ID>:<version> (by /u/<username>)`
+    and unidentified clients are throttled or blocked. It is now built from
+    `WHEEL_REDDIT_USERNAME`, or replaced by `WHEEL_REDDIT_USER_AGENT`. An install
+    that names nobody raises before a request leaves the machine.
+  - Masking how Reddit data is reached is prohibited, so the managed page-reader
+    fallback is deleted. Without credentials the source reports `blocked` and the
+    run has no Reddit evidence, which is the honest outcome.
+  - Deleted posts must be purged from every copy held, which a decision file in
+    git cannot do. `_reject_reddit_content` runs inside the same validators that
+    reject secrets: any decision or run record carrying a `reddit.com` or
+    `redd.it` link now fails to write. Findings are paraphrased, the source is
+    cited as one to re-query.
+- **The 100 QPM budget is honoured, not discovered.** `x-ratelimit-remaining` and
+  `x-ratelimit-reset` are read from every Reddit response and the next call is
+  refused inside a five-request reserve until the window resets.
+
+### Fixed
+
+- **Reddit OAuth picked the wrong grant for most apps.** The token request hard
+  coded `installed_client`, which only a public installed app accepts; a script
+  or web app carries a secret, is a confidential client and answers to
+  `client_credentials`. Reddit rejects the mismatch with a bare 401, so the grant
+  is now selected from whether `WHEEL_REDDIT_CLIENT_SECRET` is set. Verified
+  against live Reddit: a deliberate wrong-credential probe returns the 401 the
+  new `--check-reddit` command reports, not a silent empty result.
+- **`--check-reddit`.** `scripts/community_signals.py --check-reddit` mints a
+  token and prints `ok`, `unconfigured` or `error` with the grant it attempted,
+  exiting non-zero on anything but `ok`. Credentials are never printed, and a
+  test asserts the failure text carries neither the id nor the secret.
+- **`WHEEL_REDDIT_USER_AGENT`.** Reddit throttles by agent string and every
+  install previously shared one hardcoded value. The default now carries the
+  version read from the plugin manifest, and an operator can name their own.
+- **The helper scripts could not run as scripts.** `community_signals.py` and
+  `hard_metrics.py` crashed with `AttributeError` under
+  `python scripts/<name>.py`: the first `getattr` published `_gh_api` into the
+  module's own globals, and the next `_wheel_core()` call matched the running
+  module by that attribute and returned itself. The core module is now resolved
+  once and bound from that object. A test runs all three helpers as files.
+
+### Added
+
 - **Daily catalog, built by CI.** `.github/workflows/sync-catalog.yml` runs
   `scripts/build_catalog.py` on a 03:00 UTC cron and publishes `catalog.jsonl`
   plus `catalog.meta.json` to an orphan `data` branch. No VPS: GitHub Actions is

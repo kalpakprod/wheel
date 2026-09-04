@@ -2296,5 +2296,58 @@ class ExpertWheelExtensionTests(unittest.TestCase):
             mock_hard.assert_called_once_with("test/repo")
 
 
+class RedditRetentionTests(unittest.TestCase):
+    """A recorded file cannot honour a Reddit deletion, so it may not hold one."""
+
+    def _decision(self, verdict: str) -> dict:
+        return {
+            "accepted": True,
+            "task": "pick a queue",
+            "coverage": "full",
+            "implementation_mode": "adopt",
+            "verdict": verdict,
+            "picked": "owner/repo",
+            "maturity": "proven",
+            "date": "2026-09-04",
+            "core": "queue",
+            "upstream_or_fork": "upstream",
+            "candidates": [{"id": "owner/repo", "role": "base"}],
+            "evidence": [],
+            "risks": [],
+            "gaps": [],
+            "next_steps": [],
+            "rejected_reasons": [],
+            "sources": [],
+        }
+
+    def test_a_reddit_permalink_is_refused_in_a_decision(self) -> None:
+        decision = self._decision(
+            "https://www.reddit.com/r/programming/comments/1/leaving_toolx says it leaks"
+        )
+        with self.assertRaisesRegex(ValueError, "Reddit content"):
+            wheel._reject_decision_secrets(decision)
+
+    def test_a_short_reddit_link_is_refused_too(self) -> None:
+        decision = self._decision("see https://redd.it/abc123 for the postmortem")
+        with self.assertRaisesRegex(ValueError, "Reddit content"):
+            wheel._reject_decision_secrets(decision)
+
+    def test_a_run_record_may_not_carry_reddit_content(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Reddit content"):
+            wheel._reject_run_secrets(
+                {"notes": ["old.reddit.com/r/rust/comments/9/why_we_left"]}
+            )
+
+    def test_a_paraphrased_finding_without_a_link_is_allowed(self) -> None:
+        decision = self._decision(
+            "Reddit threads report memory growth under load; re-query to read them"
+        )
+        wheel._reject_decision_secrets(decision)
+
+    def test_an_unrelated_host_is_not_caught_by_the_pattern(self) -> None:
+        decision = self._decision("https://notreddit.company.dev/blog/why-we-migrated")
+        wheel._reject_decision_secrets(decision)
+
+
 if __name__ == "__main__":
     unittest.main()
