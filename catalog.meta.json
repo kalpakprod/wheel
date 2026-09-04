@@ -1,0 +1,34 @@
+{
+  "emerging_gems": 73,
+  "from_curated_lists": 180,
+  "generated_at": "2026-09-04T14:30:07Z",
+  "kinds": {
+    "design-system": 46,
+    "mcp-server": 89,
+    "plugin": 51,
+    "reference": 11,
+    "repository": 82,
+    "service": 83,
+    "skill": 38
+  },
+  "observed_gems": 80,
+  "observed_records": 532,
+  "previous_records": 0,
+  "records": 400,
+  "schema_version": 1,
+  "sources": [
+    "awesome-list:awesome-claude-code",
+    "awesome-list:awesome-mcp-servers",
+    "awesome-list:awesome-selfhosted",
+    "awesome-list:awesome-system-design-resources",
+    "awesome-list:public-apis",
+    "github-search:active-component-libraries",
+    "github-search:active-design-systems",
+    "github-search:active-mcp-servers",
+    "github-search:rising-agent-skills",
+    "github-search:rising-agent-tooling",
+    "github-search:rising-developer-tools",
+    "github-search:rising-mcp-servers"
+  ],
+  "with_momentum": 0
+}
