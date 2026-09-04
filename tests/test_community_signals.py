@@ -264,13 +264,19 @@ class TestCommunitySignals(unittest.TestCase):
             all("tiangolo" not in path for path in calls if path.startswith("search/"))
         )
 
+    @unittest.mock.patch("scripts.community_signals.search_reddit_archive")
     @unittest.mock.patch("scripts.community_signals.search_github_issues")
     @unittest.mock.patch("scripts.community_signals.search_stackexchange")
     @unittest.mock.patch("scripts.community_signals.search_reddit")
     @unittest.mock.patch("scripts.community_signals.search_hackernews")
     def test_collect_regret_signals_all_fail(
-        self, mock_hn, mock_reddit, mock_so, mock_gh
+        self, mock_hn, mock_reddit, mock_so, mock_gh, mock_archive
     ):
+        mock_archive.return_value = {
+            "source": "reddit-archive",
+            "status": "unavailable",
+            "matches": [],
+        }
         mock_hn.return_value = {
             "source": "hackernews",
             "status": "unavailable",
@@ -299,7 +305,8 @@ class TestCommunitySignals(unittest.TestCase):
         self.assertEqual(signals["counts"]["reddit"], 0)
         self.assertEqual(signals["counts"]["stackoverflow"], 0)
         self.assertEqual(signals["counts"]["github_issues"], 0)
-        self.assertEqual(len(signals["sources"]), 4)
+        self.assertEqual(len(signals["sources"]), 5)
+        self.assertEqual(signals["sources"][4]["source"], "reddit-archive")
 
     @unittest.mock.patch("scripts.community_signals._bounded_https_download")
     def test_stackexchange_probes_every_term_and_deduplicates(self, mock_download):
@@ -633,6 +640,149 @@ class ScriptEntryPointTests(unittest.TestCase):
                     timeout=60,
                 )
                 self.assertEqual(completed.returncode, 0, completed.stderr[-400:])
+
+
+class RedditArchiveTests(unittest.TestCase):
+    """The archive is a third party: no Reddit credentials, no Reddit budget."""
+
+    def _payload(self, rows):
+        return 200, json.dumps({"data": rows}).encode("utf-8"), {}
+
+    def test_the_request_goes_to_the_archive_and_carries_no_reddit_credential(
+        self,
+    ) -> None:
+        seen: dict[str, object] = {}
+
+        def fake_request(url, *, allowed_hosts, user_agent, **kwargs):
+            seen["url"] = url
+            seen["hosts"] = set(allowed_hosts)
+            seen["agent"] = user_agent
+            seen["headers"] = kwargs.get("headers")
+            return self._payload([])
+
+        env = {
+            "WHEEL_REDDIT_CLIENT_ID": "id-abc",
+            "WHEEL_REDDIT_CLIENT_SECRET": "secret-xyz",
+        }
+        with unittest.mock.patch.dict(os.environ, env, clear=False):
+            with unittest.mock.patch.object(
+                community_signals, "_bounded_http_request", fake_request
+            ):
+                result = community_signals.search_reddit_archive(
+                    "kafka", limit=5, subreddits=["dataengineering"]
+                )
+
+        self.assertEqual(result["source"], "reddit-archive")
+        self.assertIn("arctic-shift.photon-reddit.com", str(seen["url"]))
+        self.assertEqual(seen["hosts"], {"arctic-shift.photon-reddit.com"})
+        self.assertNotIn("secret-xyz", str(seen["url"]))
+        self.assertIsNone(seen["headers"])
+        self.assertTrue(str(seen["agent"]).startswith("wheel/"))
+
+    def test_rows_are_normalized_and_never_ranked_by_the_archived_score(self) -> None:
+        rows = [
+            {
+                "title": "We migrated away from ToolX",
+                "permalink": "/r/dataengineering/comments/abc/we_migrated/",
+                "subreddit": "dataengineering",
+                "score": 3,
+                "created_utc": 1672531200,
+            }
+        ]
+        with unittest.mock.patch.object(
+            community_signals,
+            "_bounded_http_request",
+            lambda *a, **k: self._payload(rows),
+        ):
+            result = community_signals.search_reddit_archive(
+                "ToolX", limit=5, subreddits=["dataengineering"]
+            )
+
+        self.assertEqual(result["status"], "ok")
+        match = result["matches"][0]
+        self.assertEqual(match["created_at"], "2023-01-01T00:00:00Z")
+        self.assertEqual(match["score_at_archive"], 3)
+        self.assertNotIn("points", match)
+        self.assertEqual(
+            match["url"],
+            "https://www.reddit.com/r/dataengineering/comments/abc/we_migrated/",
+        )
+        self.assertEqual(result["retention"], "none")
+
+    def test_a_slow_down_answer_is_retried_once_then_reported(self) -> None:
+        calls = {"n": 0}
+
+        def fake_request(*args, **kwargs):
+            calls["n"] += 1
+            raise RuntimeError("archive returned HTTP 422")
+
+        with unittest.mock.patch.object(community_signals, "time") as fake_time:
+            fake_time.time.return_value = 0.0
+            with unittest.mock.patch.object(
+                community_signals, "_bounded_http_request", fake_request
+            ):
+                result = community_signals.search_reddit_archive(
+                    "ToolX", limit=5, subreddits=["dataengineering"]
+                )
+
+        self.assertEqual(calls["n"], 2)
+        self.assertIn("422", result["reason"])
+        self.assertEqual(result["matches"], [])
+
+    def test_partial_when_one_subreddit_answers_and_another_does_not(self) -> None:
+        rows = [{"title": "t", "permalink": "/r/a/comments/1/t/", "subreddit": "a"}]
+        answers = [self._payload(rows), RuntimeError("archive returned HTTP 500")]
+
+        def fake_request(*args, **kwargs):
+            answer = answers.pop(0)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+        with unittest.mock.patch.object(community_signals, "time") as fake_time:
+            fake_time.time.return_value = 0.0
+            with unittest.mock.patch.object(
+                community_signals, "_bounded_http_request", fake_request
+            ):
+                result = community_signals.search_reddit_archive(
+                    "t", limit=5, subreddits=["a", "b"]
+                )
+
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(len(result["matches"]), 1)
+        self.assertIn("500", result["reason"])
+
+    def test_registry_maps_a_capability_and_falls_back_to_defaults(self) -> None:
+        self.assertEqual(
+            community_signals.load_subreddits("mcp-servers"), ["mcp", "ClaudeAI"]
+        )
+        self.assertEqual(
+            community_signals.load_subreddits("no-such-capability"),
+            list(community_signals.DEFAULT_SUBREDDITS),
+        )
+
+    def test_the_archive_lane_is_skipped_when_reddit_itself_answered(self) -> None:
+        ok_reddit = {"source": "reddit", "status": "ok", "matches": []}
+        empty = {"source": "x", "status": "error", "matches": []}
+        with unittest.mock.patch.object(
+            community_signals, "search_reddit", return_value=ok_reddit
+        ):
+            with unittest.mock.patch.object(
+                community_signals, "search_hackernews", return_value=empty
+            ):
+                with unittest.mock.patch.object(
+                    community_signals, "search_stackexchange", return_value=empty
+                ):
+                    with unittest.mock.patch.object(
+                        community_signals, "search_github_issues", return_value=empty
+                    ):
+                        with unittest.mock.patch.object(
+                            community_signals, "search_reddit_archive"
+                        ) as mock_archive:
+                            signals = collect_regret_signals("foo/bar")
+
+        mock_archive.assert_not_called()
+        self.assertNotIn("reddit_archive", signals["counts"])
 
 
 if __name__ == "__main__":

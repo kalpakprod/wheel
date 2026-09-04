@@ -1,0 +1,50 @@
+# Subreddits probed through the Arctic Shift archive when Reddit's own API is
+# unavailable. The archive requires a subreddit (or author) alongside a title
+# query, so this list is the search surface, not a preference.
+#
+# Keep it short: every entry costs one archive request, paced to stay polite.
+# `default` is used when no capability match is found.
+
+default:
+  - programming
+  - ExperiencedDevs
+  - devops
+
+capabilities:
+  data-pipelines:
+    - dataengineering
+    - apachekafka
+  workflow-orchestration:
+    - dataengineering
+    - devops
+  web-frontend:
+    - webdev
+    - reactjs
+  backend-services:
+    - programming
+    - golang
+  infrastructure:
+    - devops
+    - kubernetes
+    - selfhosted
+  observability:
+    - devops
+    - sre
+  databases:
+    - Database
+    - PostgreSQL
+  ml-and-inference:
+    - MachineLearning
+    - LocalLLaMA
+  agents-and-llm-tooling:
+    - LocalLLaMA
+    - ChatGPTCoding
+  mcp-servers:
+    - mcp
+    - ClaudeAI
+  developer-tooling:
+    - programming
+    - vscode
+  security:
+    - netsec
+    - sysadmin

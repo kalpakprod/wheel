@@ -9,6 +9,22 @@ The release where the plugin's claims became measurements. Everything below that
 touches the network was run against the live APIs before it was written down;
 where something could not be verified, this file says so.
 
+### Added
+
+- **`reddit-archive`, a keyless second lane.** When Reddit's API does not answer,
+  `community-signals` searches [Arctic Shift](https://arctic-shift.photon-reddit.com),
+  an independent public archive, under its own source name. No Reddit credential,
+  no Reddit budget, no account to sanction. `registry/reddit_subreddits.yaml`
+  maps capabilities to subreddits because the archive requires one alongside a
+  title query; `--subreddits` and `--capability` override it. Requests are paced
+  2.5s apart with one retry on the archive's 422 "slow down". Archived `score` is
+  reported as `score_at_archive` and excluded from ranking: it is the count at
+  ingest, not now. Verified live: 5 real threads for Kafka in r/dataengineering,
+  including one titled "Kafka deleted our data and every dashboard said we were
+  healthy". The shreddit `/svc` partials and RSS lanes used by `last30days` were
+  rejected: they read reddit.com without identifying the client, which is the
+  practice removed in this same release.
+
 ### Changed
 
 - **Reddit is now read only through OAuth, and never stored.** Three rules from
