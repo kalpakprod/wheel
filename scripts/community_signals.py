@@ -12,7 +12,7 @@ import base64
 import importlib.util
 import importlib
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import os
 import re
@@ -20,7 +20,7 @@ import time
 import sys
 import urllib.error
 import urllib.parse
-from typing import Any
+from typing import Any, Sequence
 
 
 def _wheel_core() -> Any:
@@ -90,6 +90,16 @@ PROBE_TERMS: tuple[str, ...] = (
 _PROBE_TERMS_REGISTRY_PATH = (
     Path(__file__).resolve().parents[1] / "registry" / "probe_terms.yaml"
 )
+_SUBREDDIT_REGISTRY_PATH = (
+    Path(__file__).resolve().parents[1] / "registry" / "reddit_subreddits.yaml"
+)
+ARCHIVE_SEARCH_URL = "https://arctic-shift.photon-reddit.com/api/posts/search"
+ARCHIVE_ALLOWED_HOSTS: frozenset[str] = frozenset({"arctic-shift.photon-reddit.com"})
+ARCHIVE_PACE_SECONDS = 2.5
+ARCHIVE_MAX_SUBREDDITS = 4
+ARCHIVE_TIMEOUT = 25.0
+ARCHIVE_LOOKBACK_DAYS = 900
+DEFAULT_SUBREDDITS: tuple[str, ...] = ("programming", "ExperiencedDevs", "devops")
 MAX_PROBE_TERMS: int = 8
 REDDIT_TOKEN_URL = "https://www.reddit.com/api/v1/access_token"
 REDDIT_DEVICE_ID = "DO_NOT_TRACK_THIS_DEVICE"
@@ -245,10 +255,11 @@ def load_probe_terms(registry_path: Path | None = None) -> list[str]:
     return selected_terms[:MAX_PROBE_TERMS]
 
 
-def _reddit_http_request(
+def _bounded_http_request(
     url: str,
     *,
     allowed_hosts: frozenset[str] | set[str],
+    user_agent: str,
     headers: dict[str, str] | None = None,
     data: bytes | None = None,
     max_bytes: int = 512 * 1024,
@@ -269,13 +280,10 @@ def _reddit_http_request(
     if host not in allowed_hosts:
         raise ValueError(f"host {host!r} not in allowed hosts: {allowed_hosts}")
 
-    agent = reddit_user_agent()
-    _reddit_rate_gate()
-
     req = urllib.request.Request(
         url, data=data, method="POST" if data is not None else "GET"
     )
-    req.add_header("User-Agent", agent)
+    req.add_header("User-Agent", user_agent)
     if headers:
         for k, v in headers.items():
             req.add_header(k, v)
@@ -304,8 +312,201 @@ def _reddit_http_request(
         if len(body) > max_bytes:
             raise ValueError(f"response body exceeded {max_bytes} bytes")
         resp_headers = {k.lower(): v for k, v in resp.headers.items()}
-        _record_reddit_rate(resp_headers)
         return resp.status, body, resp_headers
+
+
+def load_subreddits(capability: str | None = None) -> list[str]:
+    """Resolve the subreddits to probe, falling back to a built-in engineering set.
+
+    The archive rejects a free-text title query that is not paired with a subreddit
+    or an author, so a search surface has to be named. pyyaml is optional on a user
+    machine, exactly as it is for probe terms, so its absence degrades to defaults
+    rather than taking the source down.
+    """
+    path = _SUBREDDIT_REGISTRY_PATH
+    if not path.is_file():
+        return list(DEFAULT_SUBREDDITS)
+    try:
+        import yaml
+    except ImportError:
+        return list(DEFAULT_SUBREDDITS)
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        return list(DEFAULT_SUBREDDITS)
+    if not isinstance(data, dict):
+        return list(DEFAULT_SUBREDDITS)
+    chosen: list[str] = []
+    mapping = data.get("capabilities")
+    if capability and isinstance(mapping, dict):
+        entry = mapping.get(capability)
+        if isinstance(entry, (list, tuple)):
+            chosen = [str(item).strip().removeprefix("r/") for item in entry]
+    if not chosen:
+        fallback = data.get("default")
+        if isinstance(fallback, (list, tuple)):
+            chosen = [str(item).strip().removeprefix("r/") for item in fallback]
+    names = [name for name in dict.fromkeys(chosen) if name]
+    return names[:ARCHIVE_MAX_SUBREDDITS] or list(DEFAULT_SUBREDDITS)
+
+
+def _archive_cutoff(days: int = ARCHIVE_LOOKBACK_DAYS) -> str:
+    return (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
+
+
+def _archive_request(subreddit: str, title: str, limit: int) -> list[dict[str, Any]]:
+    """One archive query. Raises on transport failure, returns rows on success."""
+    params = urllib.parse.urlencode(
+        {
+            "subreddit": subreddit,
+            "title": title,
+            "limit": str(limit),
+            "sort": "desc",
+            "after": _archive_cutoff(),
+        }
+    )
+    status, body, _ = _bounded_http_request(
+        f"{ARCHIVE_SEARCH_URL}?{params}",
+        allowed_hosts=ARCHIVE_ALLOWED_HOSTS,
+        user_agent=archive_user_agent(),
+        max_bytes=MAX_RESPONSE_BYTES,
+        timeout=ARCHIVE_TIMEOUT,
+    )
+    if status != 200:
+        raise RuntimeError(f"archive returned HTTP {status}")
+    payload = json.loads(body.decode("utf-8"))
+    rows = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        raise RuntimeError(f"archive returned no data array: {str(payload)[:120]}")
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def archive_user_agent() -> str:
+    """The archive is a third party, so it gets an honest name and a contact repo."""
+    return f"wheel/{_plugin_version()} (+https://github.com/kalpakprod/wheel)"
+
+
+def search_reddit_archive(
+    query: str,
+    limit: int = 25,
+    capability: str | None = None,
+    subreddits: Sequence[str] | None = None,
+) -> dict:
+    """Search Reddit threads through the Arctic Shift public archive, keyless.
+
+    This is not Reddit's Data API and not a scrape of reddit.com: Arctic Shift is an
+    independent public archive, so no Reddit credentials are used, no Reddit account
+    can be sanctioned, and Reddit's per-client budget is untouched. What it costs is
+    freshness and accuracy of engagement: rows are archive snapshots, so `score` is
+    the count at ingest time and is not used for ranking.
+
+    Content still originates from Reddit users, so the result carries
+    `retention: none` and nothing here may be written into a recorded decision.
+    """
+    bounded_limit = min(limit, MAX_ITEMS_PER_SOURCE)
+    names = [
+        str(name).strip().removeprefix("r/")
+        for name in (
+            subreddits if subreddits is not None else load_subreddits(capability)
+        )
+    ]
+    names = [name for name in dict.fromkeys(names) if name][:ARCHIVE_MAX_SUBREDDITS]
+    if not names:
+        return {
+            "source": "reddit-archive",
+            "status": "unavailable",
+            "query": query,
+            "reason": "no subreddit to search: the archive requires one",
+            "retention": "none",
+            "subreddits": [],
+            "matches": [],
+        }
+
+    matches: list[dict[str, Any]] = []
+    reasons: list[str] = []
+    probed = 0
+    for index, name in enumerate(names):
+        if index:
+            time.sleep(ARCHIVE_PACE_SECONDS)
+        try:
+            rows = _archive_request(name, query, bounded_limit)
+        except Exception as exc:
+            # The archive answers 422 "slow down" under load. One paced retry is
+            # the difference between a usable source and a permanently empty one.
+            if "422" in str(exc) or "429" in str(exc):
+                time.sleep(ARCHIVE_PACE_SECONDS * 2)
+                try:
+                    rows = _archive_request(name, query, bounded_limit)
+                except Exception as retry_exc:
+                    reasons.append(f"r/{name}: {retry_exc}")
+                    continue
+            else:
+                reasons.append(f"r/{name}: {exc}")
+                continue
+        probed += 1
+        for row in rows:
+            permalink = row.get("permalink")
+            created = row.get("created_utc")
+            created_at = None
+            if isinstance(created, (int, float)):
+                created_at = datetime.fromtimestamp(created, tz=timezone.utc).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                )
+            matches.append(
+                {
+                    "title": _truncate_title(row.get("title", "")),
+                    "url": f"https://www.reddit.com{permalink}" if permalink else "",
+                    "subreddit": row.get("subreddit"),
+                    "score_at_archive": row.get("score"),
+                    "created_at": created_at,
+                }
+            )
+
+    if probed == 0:
+        return {
+            "source": "reddit-archive",
+            "status": _dead_source_status(reasons),
+            "query": query,
+            "reason": "; ".join(reasons[:3]) or "archive unreachable",
+            "retention": "none",
+            "subreddits": names,
+            "matches": [],
+        }
+
+    return {
+        "source": "reddit-archive",
+        "status": "ok" if probed == len(names) else "partial",
+        "query": query,
+        "reason": "; ".join(reasons[:3]),
+        "retention": "none",
+        "subreddits": names,
+        "matches": matches[:bounded_limit],
+    }
+
+
+def _reddit_http_request(
+    url: str,
+    *,
+    allowed_hosts: frozenset[str] | set[str],
+    headers: dict[str, str] | None = None,
+    data: bytes | None = None,
+    max_bytes: int = 512 * 1024,
+    timeout: float = 10.0,
+) -> tuple[int, bytes, dict[str, str]]:
+    """Reddit's own hosts: identify per their rules and stay inside the budget."""
+    agent = reddit_user_agent()
+    _reddit_rate_gate()
+    status, body, resp_headers = _bounded_http_request(
+        url,
+        allowed_hosts=allowed_hosts,
+        user_agent=agent,
+        headers=headers,
+        data=data,
+        max_bytes=max_bytes,
+        timeout=timeout,
+    )
+    _record_reddit_rate(resp_headers)
+    return status, body, resp_headers
 
 
 def _truncate_title(title: Any) -> str:
@@ -853,6 +1054,8 @@ def collect_regret_signals(
     slug: str,
     display_name: str | None = None,
     limit: int = 25,
+    capability: str | None = None,
+    subreddits: Sequence[str] | None = None,
 ) -> dict:
     """Run every source and aggregate regret signals.
 
@@ -873,6 +1076,14 @@ def collect_regret_signals(
     )
     reddit_result = search_reddit(reddit_query, limit=limit)
 
+    # The archive is a distinct source, not a disguise for the API: it runs only
+    # when Reddit itself did not answer, and it says so in its own status.
+    archive_result = None
+    if reddit_result.get("status") != "ok":
+        archive_result = search_reddit_archive(
+            query_term, limit=limit, capability=capability, subreddits=subreddits
+        )
+
     # Run Stack Overflow search
     so_result = search_stackexchange(query_term, limit=limit)
 
@@ -886,6 +1097,9 @@ def collect_regret_signals(
         "stackoverflow": len(so_result.get("matches", [])),
         "github_issues": len(gh_result.get("matches", [])),
     }
+    if archive_result is not None:
+        sources.append(archive_result)
+        counts["reddit_archive"] = len(archive_result.get("matches", []))
 
     available_sources = sum(1 for src in sources if src.get("status") == "ok")
 
@@ -923,6 +1137,16 @@ def main(argv: list[str] | None = None) -> int:
         default=25,
         help="Maximum matches per source (default 25, capped at 25)",
     )
+    parser.add_argument(
+        "--capability",
+        default=None,
+        help="Capability id used to pick subreddits for the archive lane",
+    )
+    parser.add_argument(
+        "--subreddits",
+        default=None,
+        help="Comma-separated subreddits for the archive lane, overriding the registry",
+    )
     parser.add_argument("--json", action="store_true", help="Output results as JSON")
 
     args = parser.parse_args(argv)
@@ -941,10 +1165,17 @@ def main(argv: list[str] | None = None) -> int:
     if not args.slug:
         parser.error("--slug is required unless --check-reddit is used")
 
+    named_subreddits = (
+        [name.strip() for name in args.subreddits.split(",") if name.strip()]
+        if args.subreddits
+        else None
+    )
     results = collect_regret_signals(
         slug=args.slug,
         display_name=args.display_name,
         limit=args.limit,
+        capability=args.capability,
+        subreddits=named_subreddits,
     )
 
     if args.json:
@@ -952,7 +1183,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     print(f"Community Signals for {results['slug']} at {results['checked_at']}")
-    print(f"Available Sources: {results['available_sources']}/3")
+    print(
+        f"Available Sources: {results['available_sources']}/{len(results['sources'])}"
+    )
     print("Counts:")
     for src_name, count in results["counts"].items():
         print(f"  - {src_name}: {count}")
