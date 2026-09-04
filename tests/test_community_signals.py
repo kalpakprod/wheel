@@ -700,6 +700,7 @@ class RedditArchiveTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "ok")
         match = result["matches"][0]
+        self.assertEqual(match["matched_field"], "title")
         self.assertEqual(match["created_at"], "2023-01-01T00:00:00Z")
         self.assertEqual(match["score_at_archive"], 3)
         self.assertNotIn("points", match)
@@ -725,7 +726,8 @@ class RedditArchiveTests(unittest.TestCase):
                     "ToolX", limit=5, subreddits=["dataengineering"]
                 )
 
-        self.assertEqual(calls["n"], 2)
+        # title and selftext, each retried once after the archive says slow down
+        self.assertEqual(calls["n"], 4)
         self.assertIn("422", result["reason"])
         self.assertEqual(result["matches"], [])
 
@@ -783,6 +785,87 @@ class RedditArchiveTests(unittest.TestCase):
 
         mock_archive.assert_not_called()
         self.assertNotIn("reddit_archive", signals["counts"])
+
+
+class ArchiveFieldSweepTests(unittest.TestCase):
+    """A migration story lives in the body as often as in the headline."""
+
+    def _rows(self, permalink):
+        return [
+            {
+                "title": "t",
+                "permalink": permalink,
+                "subreddit": "devops",
+                "created_utc": 1672531200,
+            }
+        ]
+
+    def test_the_body_is_swept_only_when_the_title_found_nothing(self) -> None:
+        seen: list[str] = []
+
+        def fake_request(url, **kwargs):
+            seen.append("selftext=" if "selftext=" in url else "title=")
+            rows = [] if "title=" in url else self._rows("/r/devops/comments/2/b/")
+            return 200, json.dumps({"data": rows}).encode("utf-8"), {}
+
+        with unittest.mock.patch.object(community_signals, "time") as fake_time:
+            fake_time.time.return_value = 0.0
+            with unittest.mock.patch.object(
+                community_signals, "_bounded_http_request", fake_request
+            ):
+                result = community_signals.search_reddit_archive(
+                    "ToolX", limit=5, subreddits=["devops"]
+                )
+
+        self.assertEqual(seen, ["title=", "selftext="])
+        self.assertEqual(result["matches"][0]["matched_field"], "selftext")
+
+    def test_a_title_hit_skips_the_body_sweep(self) -> None:
+        seen: list[str] = []
+
+        def fake_request(url, **kwargs):
+            seen.append("selftext=" if "selftext=" in url else "title=")
+            return (
+                200,
+                json.dumps({"data": self._rows("/r/devops/comments/1/a/")}).encode(
+                    "utf-8"
+                ),
+                {},
+            )
+
+        with unittest.mock.patch.object(community_signals, "time") as fake_time:
+            fake_time.time.return_value = 0.0
+            with unittest.mock.patch.object(
+                community_signals, "_bounded_http_request", fake_request
+            ):
+                result = community_signals.search_reddit_archive(
+                    "ToolX", limit=5, subreddits=["devops"]
+                )
+
+        self.assertEqual(seen, ["title="])
+        self.assertEqual(len(result["matches"]), 1)
+
+    def test_the_same_thread_is_not_reported_twice(self) -> None:
+        def fake_request(url, **kwargs):
+            rows = [] if "title=" in url else self._rows("/r/devops/comments/3/c/")
+            if "selftext=" in url:
+                rows = rows + rows
+            return 200, json.dumps({"data": rows}).encode("utf-8"), {}
+
+        with unittest.mock.patch.object(community_signals, "time") as fake_time:
+            fake_time.time.return_value = 0.0
+            with unittest.mock.patch.object(
+                community_signals, "_bounded_http_request", fake_request
+            ):
+                result = community_signals.search_reddit_archive(
+                    "ToolX", limit=5, subreddits=["devops"]
+                )
+
+        self.assertEqual(len(result["matches"]), 1)
+
+    def test_an_unsupported_field_is_refused(self) -> None:
+        with self.assertRaises(ValueError):
+            community_signals._archive_request("devops", "x", 5, field="author")
 
 
 if __name__ == "__main__":

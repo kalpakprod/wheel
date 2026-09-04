@@ -99,6 +99,7 @@ ARCHIVE_PACE_SECONDS = 2.5
 ARCHIVE_MAX_SUBREDDITS = 4
 ARCHIVE_TIMEOUT = 25.0
 ARCHIVE_LOOKBACK_DAYS = 900
+ARCHIVE_FIELDS: tuple[str, ...] = ("title", "selftext")
 DEFAULT_SUBREDDITS: tuple[str, ...] = ("programming", "ExperiencedDevs", "devops")
 MAX_PROBE_TERMS: int = 8
 REDDIT_TOKEN_URL = "https://www.reddit.com/api/v1/access_token"
@@ -354,12 +355,20 @@ def _archive_cutoff(days: int = ARCHIVE_LOOKBACK_DAYS) -> str:
     return (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
 
 
-def _archive_request(subreddit: str, title: str, limit: int) -> list[dict[str, Any]]:
-    """One archive query. Raises on transport failure, returns rows on success."""
+def _archive_request(
+    subreddit: str, query: str, limit: int, field: str = "title"
+) -> list[dict[str, Any]]:
+    """One archive query. Raises on transport failure, returns rows on success.
+
+    `field` is `title` or `selftext`: the archive matches either, and a migration
+    story is as likely to be in the body of a post as in its headline.
+    """
+    if field not in ARCHIVE_FIELDS:
+        raise ValueError(f"unsupported archive field: {field}")
     params = urllib.parse.urlencode(
         {
             "subreddit": subreddit,
-            "title": title,
+            field: query,
             "limit": str(limit),
             "sort": "desc",
             "after": _archive_cutoff(),
@@ -423,44 +432,62 @@ def search_reddit_archive(
         }
 
     matches: list[dict[str, Any]] = []
+    seen_urls: set[str] = set()
     reasons: list[str] = []
     probed = 0
-    for index, name in enumerate(names):
-        if index:
-            time.sleep(ARCHIVE_PACE_SECONDS)
-        try:
-            rows = _archive_request(name, query, bounded_limit)
-        except Exception as exc:
-            # The archive answers 422 "slow down" under load. One paced retry is
-            # the difference between a usable source and a permanently empty one.
-            if "422" in str(exc) or "429" in str(exc):
-                time.sleep(ARCHIVE_PACE_SECONDS * 2)
-                try:
-                    rows = _archive_request(name, query, bounded_limit)
-                except Exception as retry_exc:
-                    reasons.append(f"r/{name}: {retry_exc}")
-                    continue
-            else:
-                reasons.append(f"r/{name}: {exc}")
+    requests_made = 0
+    for name in names:
+        empty_for_this_sub = True
+        for field in ARCHIVE_FIELDS:
+            if field == "selftext" and not empty_for_this_sub:
+                # The title already answered for this subreddit; a body sweep would
+                # cost another eight seconds to mostly repeat it.
                 continue
-        probed += 1
-        for row in rows:
-            permalink = row.get("permalink")
-            created = row.get("created_utc")
-            created_at = None
-            if isinstance(created, (int, float)):
-                created_at = datetime.fromtimestamp(created, tz=timezone.utc).strftime(
-                    "%Y-%m-%dT%H:%M:%SZ"
+            if requests_made:
+                time.sleep(ARCHIVE_PACE_SECONDS)
+            requests_made += 1
+            try:
+                rows = _archive_request(name, query, bounded_limit, field=field)
+            except Exception as exc:
+                # The archive answers 422 "slow down" under load. One paced retry
+                # is the difference between a usable source and an empty one.
+                if "422" in str(exc) or "429" in str(exc):
+                    time.sleep(ARCHIVE_PACE_SECONDS * 2)
+                    try:
+                        rows = _archive_request(name, query, bounded_limit, field=field)
+                    except Exception as retry_exc:
+                        reasons.append(f"r/{name} [{field}]: {retry_exc}")
+                        continue
+                else:
+                    reasons.append(f"r/{name} [{field}]: {exc}")
+                    continue
+            if field == "title":
+                probed += 1
+            if rows:
+                empty_for_this_sub = False
+            for row in rows:
+                permalink = row.get("permalink")
+                url = f"https://www.reddit.com{permalink}" if permalink else ""
+                if url and url in seen_urls:
+                    continue
+                if url:
+                    seen_urls.add(url)
+                created = row.get("created_utc")
+                created_at = None
+                if isinstance(created, (int, float)):
+                    created_at = datetime.fromtimestamp(
+                        created, tz=timezone.utc
+                    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+                matches.append(
+                    {
+                        "title": _truncate_title(row.get("title", "")),
+                        "url": url,
+                        "subreddit": row.get("subreddit"),
+                        "score_at_archive": row.get("score"),
+                        "created_at": created_at,
+                        "matched_field": field,
+                    }
                 )
-            matches.append(
-                {
-                    "title": _truncate_title(row.get("title", "")),
-                    "url": f"https://www.reddit.com{permalink}" if permalink else "",
-                    "subreddit": row.get("subreddit"),
-                    "score_at_archive": row.get("score"),
-                    "created_at": created_at,
-                }
-            )
 
     if probed == 0:
         return {

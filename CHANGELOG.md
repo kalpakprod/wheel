@@ -24,6 +24,15 @@ where something could not be verified, this file says so.
   healthy". The shreddit `/svc` partials and RSS lanes used by `last30days` were
   rejected: they read reddit.com without identifying the client, which is the
   practice removed in this same release.
+- **The archive lane also sweeps post bodies.** Each subreddit is queried by
+  title first and by `selftext` only when the title returned nothing, so a
+  migration story written in the body is found for one extra request rather than
+  a doubling. Matches carry `matched_field` and are deduplicated by permalink.
+  Every other free route was called before being judged and is recorded in ADR
+  0013: `old.reddit.com/search.json` now answers 352 KB of HTML, `search.rss`
+  works but is an unidentified read of reddit.com, PullPush answers
+  `"This website does not provide free scraping resources for agents"`, and
+  Arctic Shift's comment search times out at any volume.
 
 ### Changed
 
