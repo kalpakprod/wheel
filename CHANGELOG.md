@@ -9,6 +9,26 @@ The release where the plugin's claims became measurements. Everything below that
 touches the network was run against the live APIs before it was written down;
 where something could not be verified, this file says so.
 
+### Changed
+
+- **Reddit is now read only through OAuth, and never stored.** Three rules from
+  Reddit's Data API Wiki and Responsible Builder Policy were being broken:
+  - The agent string must be `<platform>:<app ID>:<version> (by /u/<username>)`
+    and unidentified clients are throttled or blocked. It is now built from
+    `WHEEL_REDDIT_USERNAME`, or replaced by `WHEEL_REDDIT_USER_AGENT`. An install
+    that names nobody raises before a request leaves the machine.
+  - Masking how Reddit data is reached is prohibited, so the managed page-reader
+    fallback is deleted. Without credentials the source reports `blocked` and the
+    run has no Reddit evidence, which is the honest outcome.
+  - Deleted posts must be purged from every copy held, which a decision file in
+    git cannot do. `_reject_reddit_content` runs inside the same validators that
+    reject secrets: any decision or run record carrying a `reddit.com` or
+    `redd.it` link now fails to write. Findings are paraphrased, the source is
+    cited as one to re-query.
+- **The 100 QPM budget is honoured, not discovered.** `x-ratelimit-remaining` and
+  `x-ratelimit-reset` are read from every Reddit response and the next call is
+  refused inside a five-request reserve until the window resets.
+
 ### Fixed
 
 - **Reddit OAuth picked the wrong grant for most apps.** The token request hard

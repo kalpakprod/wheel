@@ -2157,12 +2157,41 @@ def _reject_secret_material(value: Any, subject: str) -> None:
         raise ValueError(f"{subject} contains forbidden secret material")
 
 
+REDDIT_CONTENT_PATTERN = re.compile(
+    r"(?:^|[^\w.])(?:[a-z0-9-]+\.)?reddit\.com/|(?:^|[^\w.])redd\.it/", re.IGNORECASE
+)
+
+
+def _reject_reddit_content(value: Any, subject: str) -> None:
+    """Keep Reddit content out of anything written to disk.
+
+    Reddit's Data API terms require deleted posts and comments to be removed from
+    every copy held, including titles, bodies and embedded URLs, and state that
+    retaining them is a violation even when anonymized. A decision file lives in git
+    forever, so it cannot honour a deletion. Reddit therefore informs the verdict
+    during the run and is cited as a live source to re-query, never quoted into it.
+    """
+    if isinstance(value, dict):
+        for nested in value.values():
+            _reject_reddit_content(nested, subject)
+    elif isinstance(value, list):
+        for nested in value:
+            _reject_reddit_content(nested, subject)
+    elif isinstance(value, str) and REDDIT_CONTENT_PATTERN.search(value):
+        raise ValueError(
+            f"{subject} may not carry Reddit content: Reddit's Data API terms require "
+            "deleted posts to be purged from every copy, which a recorded file cannot do"
+        )
+
+
 def _reject_decision_secrets(value: Any) -> None:
     _reject_secret_material(value, "decision")
+    _reject_reddit_content(value, "decision")
 
 
 def _reject_run_secrets(value: Any) -> None:
     _reject_secret_material(value, "run record")
+    _reject_reddit_content(value, "run record")
 
 
 def _decision_slug(decision: dict[str, Any]) -> str:
