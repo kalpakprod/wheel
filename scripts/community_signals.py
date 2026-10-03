@@ -12,14 +12,15 @@ import base64
 import importlib.util
 import importlib
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import os
+import re
 import time
 import sys
 import urllib.error
 import urllib.parse
-from typing import Any
+from typing import Any, Sequence
 
 
 def _wheel_core() -> Any:
@@ -48,9 +49,13 @@ def _wheel_core() -> Any:
     return module
 
 
-_bounded_https_download = getattr(_wheel_core(), "_bounded_https_download")
-_gh_api = getattr(_wheel_core(), "_gh_api")
-_timestamp = getattr(_wheel_core(), "_timestamp")
+# Bind from one module object: the first getattr publishes _gh_api into this
+# module's globals, and when this file is __main__ a second _wheel_core() call
+# would match itself by that very attribute and return the wrong module.
+_core = _wheel_core()
+_bounded_https_download = getattr(_core, "_bounded_https_download")
+_gh_api = getattr(_core, "_gh_api")
+_timestamp = getattr(_core, "_timestamp")
 
 
 MAX_RESPONSE_BYTES = 256 * 1024  # 256 KiB
@@ -71,7 +76,6 @@ NEGATIVE_TERMS: tuple[str, ...] = (
 HN_ALLOWED_HOSTS: frozenset[str] = frozenset({"hn.algolia.com"})
 SEARCH_PROBE_PAUSE_SECONDS = 2.5
 STACKEXCHANGE_ALLOWED_HOSTS: frozenset[str] = frozenset({"api.stackexchange.com"})
-REDDIT_ALLOWED_HOSTS: frozenset[str] = frozenset({"www.reddit.com"})
 REDDIT_TOKEN_HOSTS: frozenset[str] = frozenset({"www.reddit.com"})
 REDDIT_OAUTH_HOSTS: frozenset[str] = frozenset({"oauth.reddit.com"})
 
@@ -86,8 +90,116 @@ PROBE_TERMS: tuple[str, ...] = (
 _PROBE_TERMS_REGISTRY_PATH = (
     Path(__file__).resolve().parents[1] / "registry" / "probe_terms.yaml"
 )
+_SUBREDDIT_REGISTRY_PATH = (
+    Path(__file__).resolve().parents[1] / "registry" / "reddit_subreddits.yaml"
+)
+ARCHIVE_SEARCH_URL = "https://arctic-shift.photon-reddit.com/api/posts/search"
+ARCHIVE_ALLOWED_HOSTS: frozenset[str] = frozenset({"arctic-shift.photon-reddit.com"})
+ARCHIVE_PACE_SECONDS = 2.5
+ARCHIVE_MAX_SUBREDDITS = 4
+ARCHIVE_TIMEOUT = 25.0
+ARCHIVE_LOOKBACK_DAYS = 900
+ARCHIVE_FIELDS: tuple[str, ...] = ("title", "selftext")
+DEFAULT_SUBREDDITS: tuple[str, ...] = ("programming", "ExperiencedDevs", "devops")
 MAX_PROBE_TERMS: int = 8
+REDDIT_TOKEN_URL = "https://www.reddit.com/api/v1/access_token"
+REDDIT_DEVICE_ID = "DO_NOT_TRACK_THIS_DEVICE"
+REDDIT_INSTALLED_GRANT = "https://oauth.reddit.com/grants/installed_client"
+REDDIT_CLIENT_ID_ENV = "WHEEL_REDDIT_CLIENT_ID"
+REDDIT_CLIENT_SECRET_ENV = "WHEEL_REDDIT_CLIENT_SECRET"
+REDDIT_USER_AGENT_ENV = "WHEEL_REDDIT_USER_AGENT"
+REDDIT_USERNAME_ENV = "WHEEL_REDDIT_USERNAME"
+REDDIT_APP_ID = "com.kalpakprod.wheel"
+REDDIT_USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{3,20}$")
+REDDIT_RATE_RESERVE = 5
+_REDDIT_RATE_STATE: dict[str, float] = {}
+_PLUGIN_MANIFEST = (
+    Path(__file__).resolve().parents[1] / ".claude-plugin" / "plugin.json"
+)
 _REDDIT_TOKEN_CACHE: dict[str, str] = {}
+
+
+def _plugin_version() -> str:
+    """Read the shipped version so the agent string never claims a stale release."""
+    try:
+        manifest = json.loads(_PLUGIN_MANIFEST.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "0.0.0"
+    version = manifest.get("version")
+    return version if isinstance(version, str) and version else "0.0.0"
+
+
+class RedditComplianceError(RuntimeError):
+    """Raised when a request would break Reddit's Data API rules if it were sent."""
+
+
+def reddit_user_agent() -> str:
+    """Build the agent string Reddit's Data API Wiki mandates, or refuse to call.
+
+    Required shape: ``<platform>:<app ID>:<version> (by /u/<username>)``. Reddit
+    states it throttles or blocks unidentified clients and that a generic agent is
+    limited on purpose, so an install without a contact username is not allowed to
+    reach the API at all rather than being throttled as an anonymous stranger.
+    """
+    configured = os.environ.get(REDDIT_USER_AGENT_ENV, "").strip()
+    if configured:
+        return configured
+    username = os.environ.get(REDDIT_USERNAME_ENV, "").strip().lstrip("/")
+    if username.lower().startswith("u/"):
+        username = username[2:]
+    if not REDDIT_USERNAME_PATTERN.match(username):
+        raise RedditComplianceError(
+            f"Reddit requires a contact username in the User-Agent: set {REDDIT_USERNAME_ENV} "
+            f"to your Reddit handle, or set {REDDIT_USER_AGENT_ENV} to a full compliant string"
+        )
+    return f"python:{REDDIT_APP_ID}:v{_plugin_version()} (by /u/{username})"
+
+
+def _reddit_rate_gate() -> None:
+    """Stop before the free-tier budget runs out instead of discovering it with a 429.
+
+    Reddit publishes 100 queries per minute per OAuth client id and asks callers to
+    watch the x-ratelimit headers. The last response's remaining count is kept, and
+    once it drops into the reserve the next call is refused until the window resets.
+    """
+    remaining = _REDDIT_RATE_STATE.get("remaining")
+    reset_at = _REDDIT_RATE_STATE.get("reset_at", 0.0)
+    if remaining is None:
+        return
+    if remaining > REDDIT_RATE_RESERVE:
+        return
+    wait = reset_at - time.time()
+    if wait <= 0:
+        _REDDIT_RATE_STATE.clear()
+        return
+    raise RedditComplianceError(
+        f"Reddit rate budget exhausted: {int(remaining)} requests left, "
+        f"{int(wait)}s to window reset"
+    )
+
+
+def _record_reddit_rate(headers: dict[str, str]) -> None:
+    """Remember the published budget so the next call can honour it."""
+    try:
+        remaining = float(headers["x-ratelimit-remaining"])
+        reset = float(headers["x-ratelimit-reset"])
+    except (KeyError, TypeError, ValueError):
+        return
+    _REDDIT_RATE_STATE["remaining"] = remaining
+    _REDDIT_RATE_STATE["reset_at"] = time.time() + reset
+
+
+def _reddit_grant_payload(client_secret: str) -> dict[str, str]:
+    """Pick the grant Reddit accepts for this app type instead of guessing one.
+
+    A script or web app is a confidential client and answers to client_credentials.
+    An installed app carries no secret and answers only to the installed_client grant.
+    The wrong grant returns 401 with no explanation, so the choice is made from the
+    one fact that distinguishes the two: whether a secret was configured.
+    """
+    if client_secret:
+        return {"grant_type": "client_credentials"}
+    return {"grant_type": REDDIT_INSTALLED_GRANT, "device_id": REDDIT_DEVICE_ID}
 
 
 def load_probe_terms(registry_path: Path | None = None) -> list[str]:
@@ -144,10 +256,11 @@ def load_probe_terms(registry_path: Path | None = None) -> list[str]:
     return selected_terms[:MAX_PROBE_TERMS]
 
 
-def _reddit_http_request(
+def _bounded_http_request(
     url: str,
     *,
     allowed_hosts: frozenset[str] | set[str],
+    user_agent: str,
     headers: dict[str, str] | None = None,
     data: bytes | None = None,
     max_bytes: int = 512 * 1024,
@@ -171,7 +284,7 @@ def _reddit_http_request(
     req = urllib.request.Request(
         url, data=data, method="POST" if data is not None else "GET"
     )
-    req.add_header("User-Agent", "wheel-plugin/1.0 (community-signals)")
+    req.add_header("User-Agent", user_agent)
     if headers:
         for k, v in headers.items():
             req.add_header(k, v)
@@ -201,6 +314,226 @@ def _reddit_http_request(
             raise ValueError(f"response body exceeded {max_bytes} bytes")
         resp_headers = {k.lower(): v for k, v in resp.headers.items()}
         return resp.status, body, resp_headers
+
+
+def load_subreddits(capability: str | None = None) -> list[str]:
+    """Resolve the subreddits to probe, falling back to a built-in engineering set.
+
+    The archive rejects a free-text title query that is not paired with a subreddit
+    or an author, so a search surface has to be named. pyyaml is optional on a user
+    machine, exactly as it is for probe terms, so its absence degrades to defaults
+    rather than taking the source down.
+    """
+    path = _SUBREDDIT_REGISTRY_PATH
+    if not path.is_file():
+        return list(DEFAULT_SUBREDDITS)
+    try:
+        import yaml
+    except ImportError:
+        return list(DEFAULT_SUBREDDITS)
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        return list(DEFAULT_SUBREDDITS)
+    if not isinstance(data, dict):
+        return list(DEFAULT_SUBREDDITS)
+    chosen: list[str] = []
+    mapping = data.get("capabilities")
+    if capability and isinstance(mapping, dict):
+        entry = mapping.get(capability)
+        if isinstance(entry, (list, tuple)):
+            chosen = [str(item).strip().removeprefix("r/") for item in entry]
+    if not chosen:
+        fallback = data.get("default")
+        if isinstance(fallback, (list, tuple)):
+            chosen = [str(item).strip().removeprefix("r/") for item in fallback]
+    names = [name for name in dict.fromkeys(chosen) if name]
+    return names[:ARCHIVE_MAX_SUBREDDITS] or list(DEFAULT_SUBREDDITS)
+
+
+def _archive_cutoff(days: int = ARCHIVE_LOOKBACK_DAYS) -> str:
+    return (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
+
+
+def _archive_request(
+    subreddit: str, query: str, limit: int, field: str = "title"
+) -> list[dict[str, Any]]:
+    """One archive query. Raises on transport failure, returns rows on success.
+
+    `field` is `title` or `selftext`: the archive matches either, and a migration
+    story is as likely to be in the body of a post as in its headline.
+    """
+    if field not in ARCHIVE_FIELDS:
+        raise ValueError(f"unsupported archive field: {field}")
+    params = urllib.parse.urlencode(
+        {
+            "subreddit": subreddit,
+            field: query,
+            "limit": str(limit),
+            "sort": "desc",
+            "after": _archive_cutoff(),
+        }
+    )
+    status, body, _ = _bounded_http_request(
+        f"{ARCHIVE_SEARCH_URL}?{params}",
+        allowed_hosts=ARCHIVE_ALLOWED_HOSTS,
+        user_agent=archive_user_agent(),
+        max_bytes=MAX_RESPONSE_BYTES,
+        timeout=ARCHIVE_TIMEOUT,
+    )
+    if status != 200:
+        raise RuntimeError(f"archive returned HTTP {status}")
+    payload = json.loads(body.decode("utf-8"))
+    rows = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        raise RuntimeError(f"archive returned no data array: {str(payload)[:120]}")
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def archive_user_agent() -> str:
+    """The archive is a third party, so it gets an honest name and a contact repo."""
+    return f"wheel/{_plugin_version()} (+https://github.com/kalpakprod/wheel)"
+
+
+def search_reddit_archive(
+    query: str,
+    limit: int = 25,
+    capability: str | None = None,
+    subreddits: Sequence[str] | None = None,
+) -> dict:
+    """Search Reddit threads through the Arctic Shift public archive, keyless.
+
+    This is not Reddit's Data API and not a scrape of reddit.com: Arctic Shift is an
+    independent public archive, so no Reddit credentials are used, no Reddit account
+    can be sanctioned, and Reddit's per-client budget is untouched. What it costs is
+    freshness and accuracy of engagement: rows are archive snapshots, so `score` is
+    the count at ingest time and is not used for ranking.
+
+    Content still originates from Reddit users, so the result carries
+    `retention: none` and nothing here may be written into a recorded decision.
+    """
+    bounded_limit = min(limit, MAX_ITEMS_PER_SOURCE)
+    names = [
+        str(name).strip().removeprefix("r/")
+        for name in (
+            subreddits if subreddits is not None else load_subreddits(capability)
+        )
+    ]
+    names = [name for name in dict.fromkeys(names) if name][:ARCHIVE_MAX_SUBREDDITS]
+    if not names:
+        return {
+            "source": "reddit-archive",
+            "status": "unavailable",
+            "query": query,
+            "reason": "no subreddit to search: the archive requires one",
+            "retention": "none",
+            "subreddits": [],
+            "matches": [],
+        }
+
+    matches: list[dict[str, Any]] = []
+    seen_urls: set[str] = set()
+    reasons: list[str] = []
+    probed = 0
+    requests_made = 0
+    for name in names:
+        empty_for_this_sub = True
+        for field in ARCHIVE_FIELDS:
+            if field == "selftext" and not empty_for_this_sub:
+                # The title already answered for this subreddit; a body sweep would
+                # cost another eight seconds to mostly repeat it.
+                continue
+            if requests_made:
+                time.sleep(ARCHIVE_PACE_SECONDS)
+            requests_made += 1
+            try:
+                rows = _archive_request(name, query, bounded_limit, field=field)
+            except Exception as exc:
+                # The archive answers 422 "slow down" under load. One paced retry
+                # is the difference between a usable source and an empty one.
+                if "422" in str(exc) or "429" in str(exc):
+                    time.sleep(ARCHIVE_PACE_SECONDS * 2)
+                    try:
+                        rows = _archive_request(name, query, bounded_limit, field=field)
+                    except Exception as retry_exc:
+                        reasons.append(f"r/{name} [{field}]: {retry_exc}")
+                        continue
+                else:
+                    reasons.append(f"r/{name} [{field}]: {exc}")
+                    continue
+            if field == "title":
+                probed += 1
+            if rows:
+                empty_for_this_sub = False
+            for row in rows:
+                permalink = row.get("permalink")
+                url = f"https://www.reddit.com{permalink}" if permalink else ""
+                if url and url in seen_urls:
+                    continue
+                if url:
+                    seen_urls.add(url)
+                created = row.get("created_utc")
+                created_at = None
+                if isinstance(created, (int, float)):
+                    created_at = datetime.fromtimestamp(
+                        created, tz=timezone.utc
+                    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+                matches.append(
+                    {
+                        "title": _truncate_title(row.get("title", "")),
+                        "url": url,
+                        "subreddit": row.get("subreddit"),
+                        "score_at_archive": row.get("score"),
+                        "created_at": created_at,
+                        "matched_field": field,
+                    }
+                )
+
+    if probed == 0:
+        return {
+            "source": "reddit-archive",
+            "status": _dead_source_status(reasons),
+            "query": query,
+            "reason": "; ".join(reasons[:3]) or "archive unreachable",
+            "retention": "none",
+            "subreddits": names,
+            "matches": [],
+        }
+
+    return {
+        "source": "reddit-archive",
+        "status": "ok" if probed == len(names) else "partial",
+        "query": query,
+        "reason": "; ".join(reasons[:3]),
+        "retention": "none",
+        "subreddits": names,
+        "matches": matches[:bounded_limit],
+    }
+
+
+def _reddit_http_request(
+    url: str,
+    *,
+    allowed_hosts: frozenset[str] | set[str],
+    headers: dict[str, str] | None = None,
+    data: bytes | None = None,
+    max_bytes: int = 512 * 1024,
+    timeout: float = 10.0,
+) -> tuple[int, bytes, dict[str, str]]:
+    """Reddit's own hosts: identify per their rules and stay inside the budget."""
+    agent = reddit_user_agent()
+    _reddit_rate_gate()
+    status, body, resp_headers = _bounded_http_request(
+        url,
+        allowed_hosts=allowed_hosts,
+        user_agent=agent,
+        headers=headers,
+        data=data,
+        max_bytes=max_bytes,
+        timeout=timeout,
+    )
+    _record_reddit_rate(resp_headers)
+    return status, body, resp_headers
 
 
 def _truncate_title(title: Any) -> str:
@@ -325,7 +658,7 @@ def _get_reddit_oauth_token() -> str | None:
     Caches token in-memory in _REDDIT_TOKEN_CACHE for the process only.
     Never prints or logs credentials.
     """
-    client_id = os.environ.get("WHEEL_REDDIT_CLIENT_ID", "").strip()
+    client_id = os.environ.get(REDDIT_CLIENT_ID_ENV, "").strip()
     if not client_id:
         return None
 
@@ -333,17 +666,12 @@ def _get_reddit_oauth_token() -> str | None:
     if cached:
         return cached
 
-    client_secret = os.environ.get("WHEEL_REDDIT_CLIENT_SECRET", "").strip()
+    client_secret = os.environ.get(REDDIT_CLIENT_SECRET_ENV, "").strip()
     user_pass = f"{client_id}:{client_secret}".encode("utf-8")
     basic_auth = base64.b64encode(user_pass).decode("ascii")
 
-    token_url = "https://www.reddit.com/api/v1/access_token"
-    data = urllib.parse.urlencode(
-        {
-            "grant_type": "https://oauth.reddit.com/grants/installed_client",
-            "device_id": "DO_NOT_TRACK_THIS_DEVICE",
-        }
-    ).encode("utf-8")
+    token_url = REDDIT_TOKEN_URL
+    data = urllib.parse.urlencode(_reddit_grant_payload(client_secret)).encode("utf-8")
 
     headers = {
         "Authorization": f"Basic {basic_auth}",
@@ -380,6 +708,57 @@ def _get_reddit_oauth_token() -> str | None:
     return token
 
 
+def check_reddit_credentials() -> dict[str, Any]:
+    """Mint a token and report the outcome, so a misconfigured app is visible at once.
+
+    Returns the grant that was attempted and the failure text. Credentials themselves
+    are never returned, printed or logged.
+    """
+    client_id = os.environ.get(REDDIT_CLIENT_ID_ENV, "").strip()
+    if not client_id:
+        return {
+            "source": "reddit",
+            "status": "unconfigured",
+            "grant": "",
+            "reason": f"{REDDIT_CLIENT_ID_ENV} is not set",
+        }
+    client_secret = os.environ.get(REDDIT_CLIENT_SECRET_ENV, "").strip()
+    grant = _reddit_grant_payload(client_secret)["grant_type"]
+    try:
+        agent = reddit_user_agent()
+    except RedditComplianceError as exc:
+        return {
+            "source": "reddit",
+            "status": "unconfigured",
+            "grant": grant,
+            "reason": str(exc),
+        }
+    _REDDIT_TOKEN_CACHE.pop("access_token", None)
+    try:
+        token = _get_reddit_oauth_token()
+    except Exception as exc:
+        return {
+            "source": "reddit",
+            "status": "error",
+            "grant": grant,
+            "reason": str(exc),
+        }
+    if not token:
+        return {
+            "source": "reddit",
+            "status": "unconfigured",
+            "grant": grant,
+            "reason": f"{REDDIT_CLIENT_ID_ENV} is not set",
+        }
+    return {
+        "source": "reddit",
+        "status": "ok",
+        "grant": grant,
+        "user_agent": agent,
+        "reason": "",
+    }
+
+
 def _search_reddit_oauth(query: str, limit: int, token: str) -> dict:
     """Execute search query using Reddit OAuth API."""
     params = urllib.parse.urlencode(
@@ -404,97 +783,65 @@ def _search_reddit_oauth(query: str, limit: int, token: str) -> dict:
     return json.loads(raw_bytes.decode("utf-8"))
 
 
-def _search_reddit_donsetch(query: str, limit: int) -> dict:
-    """Fallback reader using wheel's donsetch dynamic-page reader."""
-    core = _wheel_core()
-    donsetch = getattr(core, "donsetch_fetch", None)
-    if not callable(donsetch):
-        raise RuntimeError("donsetch reader not available in core")
-
-    params = urllib.parse.urlencode(
-        {
-            "q": query,
-            "sort": "relevance",
-            "limit": str(limit),
-        }
-    )
-    public_url = f"https://www.reddit.com/search.json?{params}"
-    res = donsetch(public_url, allowed_hosts=REDDIT_ALLOWED_HOSTS)
-    if isinstance(res, dict):
-        status_field = res.get("status")
-        if status_field in ("blocked", "unavailable", "error"):
-            reason = (
-                res.get("detail")
-                or res.get("reason")
-                or res.get("error")
-                or f"donsetch fetch returned {status_field}"
-            )
-            raise RuntimeError(reason)
-        # In donsetch_fetch, on success data["content"] has the text/content
-        content = res.get("content")
-        if not content and isinstance(res.get("data"), dict):
-            content = res["data"].get("content")
-        if not content:
-            content = res.get("body")
-        if isinstance(content, bytes):
-            return json.loads(content.decode("utf-8"))
-        elif isinstance(content, str) and content.strip():
-            return json.loads(content)
-        raise RuntimeError("donsetch returned no readable payload body")
-    if hasattr(res, "status_code"):
-        status_code = getattr(res, "status_code", 200)
-        if status_code != 200:
-            raise RuntimeError(f"HTTP {status_code}")
-        body = getattr(res, "body", b"")
-        if isinstance(body, bytes):
-            return json.loads(body.decode("utf-8"))
-        elif isinstance(body, str):
-            return json.loads(body)
-    raise RuntimeError(f"donsetch returned unexpected response type: {type(res)}")
+def _reddit_blocked(query: str, reason: str) -> dict:
+    """Reddit is either read through OAuth or not read at all."""
+    return {
+        "source": "reddit",
+        "status": "blocked",
+        "query": query,
+        "reason": reason,
+        "retention": "none",
+        "matches": [],
+    }
 
 
 def search_reddit(query: str, limit: int = 25) -> dict:
-    """Search Reddit public posts for regret/migration discussions.
+    """Search Reddit for regret and migration discussions through the Data API.
 
-    Attempts app-only OAuth first when WHEEL_REDDIT_CLIENT_ID is set.
-    Falls back to donsetch managed reader on unconfigured or failed OAuth.
-    Returns status 'blocked' or 'unavailable' on failures, never fabricated results.
+    OAuth is the only route. Reddit's Responsible Builder Policy forbids masking how
+    its data is reached, and its API wiki says unauthenticated traffic is blocked
+    outright, so an unconfigured install reports `blocked` instead of reaching the
+    same content through a managed page reader.
+
+    Matches are returned for the caller to read now. They carry `retention: none`:
+    Reddit requires deleted content to be removed from any copy held, so nothing
+    from this source is written to disk by the decision path.
     """
     bounded_limit = min(limit, MAX_ITEMS_PER_SOURCE)
 
-    data = None
-    last_error: Exception | None = None
-
-    oauth_token = None
     try:
         oauth_token = _get_reddit_oauth_token()
+    except RedditComplianceError as exc:
+        return _reddit_blocked(query, str(exc))
     except Exception as exc:
-        last_error = exc
+        return _reddit_blocked(query, str(exc))
 
-    if oauth_token:
-        try:
-            data = _search_reddit_oauth(query, bounded_limit, oauth_token)
-        except Exception as exc:
-            last_error = exc
+    if not oauth_token:
+        return _reddit_blocked(
+            query,
+            f"{REDDIT_CLIENT_ID_ENV} is not set: register an app at "
+            "https://www.reddit.com/prefs/apps and configure app-only OAuth",
+        )
 
-    if data is None:
-        try:
-            data = _search_reddit_donsetch(query, bounded_limit)
-        except Exception as exc:
-            last_error = exc
-            exc_str = str(exc)
-            status_val = (
-                "blocked"
-                if ("403" in exc_str or "blocked" in exc_str.lower())
-                else "unavailable"
-            )
-            return {
-                "source": "reddit",
-                "status": status_val,
-                "query": query,
-                "reason": exc_str,
-                "matches": [],
-            }
+    try:
+        data = _search_reddit_oauth(query, bounded_limit, oauth_token)
+    except RedditComplianceError as exc:
+        return _reddit_blocked(query, str(exc))
+    except Exception as exc:
+        exc_str = str(exc)
+        status_val = (
+            "blocked"
+            if ("403" in exc_str or "429" in exc_str or "blocked" in exc_str.lower())
+            else "unavailable"
+        )
+        return {
+            "source": "reddit",
+            "status": status_val,
+            "query": query,
+            "reason": exc_str,
+            "retention": "none",
+            "matches": [],
+        }
 
     children = (
         (data.get("data") or {}).get("children") if isinstance(data, dict) else None
@@ -505,6 +852,7 @@ def search_reddit(query: str, limit: int = 25) -> dict:
             "status": "error",
             "query": query,
             "reason": "Missing or non-list children in payload",
+            "retention": "none",
             "matches": [],
         }
 
@@ -541,6 +889,7 @@ def search_reddit(query: str, limit: int = 25) -> dict:
         "source": "reddit",
         "status": "ok",
         "query": query,
+        "retention": "none",
         "matches": matches,
     }
 
@@ -732,6 +1081,8 @@ def collect_regret_signals(
     slug: str,
     display_name: str | None = None,
     limit: int = 25,
+    capability: str | None = None,
+    subreddits: Sequence[str] | None = None,
 ) -> dict:
     """Run every source and aggregate regret signals.
 
@@ -752,6 +1103,14 @@ def collect_regret_signals(
     )
     reddit_result = search_reddit(reddit_query, limit=limit)
 
+    # The archive is a distinct source, not a disguise for the API: it runs only
+    # when Reddit itself did not answer, and it says so in its own status.
+    archive_result = None
+    if reddit_result.get("status") != "ok":
+        archive_result = search_reddit_archive(
+            query_term, limit=limit, capability=capability, subreddits=subreddits
+        )
+
     # Run Stack Overflow search
     so_result = search_stackexchange(query_term, limit=limit)
 
@@ -765,6 +1124,9 @@ def collect_regret_signals(
         "stackoverflow": len(so_result.get("matches", [])),
         "github_issues": len(gh_result.get("matches", [])),
     }
+    if archive_result is not None:
+        sources.append(archive_result)
+        counts["reddit_archive"] = len(archive_result.get("matches", []))
 
     available_sources = sum(1 for src in sources if src.get("status") == "ok")
 
@@ -784,7 +1146,12 @@ def main(argv: list[str] | None = None) -> int:
         description="Search Reddit, Hacker News, and GitHub issues for community regret signals.",
     )
     parser.add_argument(
-        "--slug", required=True, help="GitHub repository slug (owner/repo)"
+        "--slug", default=None, help="GitHub repository slug (owner/repo)"
+    )
+    parser.add_argument(
+        "--check-reddit",
+        action="store_true",
+        help="Verify the configured Reddit app can mint a token, then exit",
     )
     parser.add_argument(
         "--display-name",
@@ -797,14 +1164,45 @@ def main(argv: list[str] | None = None) -> int:
         default=25,
         help="Maximum matches per source (default 25, capped at 25)",
     )
+    parser.add_argument(
+        "--capability",
+        default=None,
+        help="Capability id used to pick subreddits for the archive lane",
+    )
+    parser.add_argument(
+        "--subreddits",
+        default=None,
+        help="Comma-separated subreddits for the archive lane, overriding the registry",
+    )
     parser.add_argument("--json", action="store_true", help="Output results as JSON")
 
     args = parser.parse_args(argv)
 
+    if args.check_reddit:
+        report = check_reddit_credentials()
+        if args.json:
+            print(json.dumps(report, indent=2))
+        else:
+            grant = f" ({report['grant']})" if report["grant"] else ""
+            print(f"reddit: {report['status']}{grant}")
+            if report["reason"]:
+                print(f"  reason: {report['reason']}")
+        return 0 if report["status"] == "ok" else 1
+
+    if not args.slug:
+        parser.error("--slug is required unless --check-reddit is used")
+
+    named_subreddits = (
+        [name.strip() for name in args.subreddits.split(",") if name.strip()]
+        if args.subreddits
+        else None
+    )
     results = collect_regret_signals(
         slug=args.slug,
         display_name=args.display_name,
         limit=args.limit,
+        capability=args.capability,
+        subreddits=named_subreddits,
     )
 
     if args.json:
@@ -812,7 +1210,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     print(f"Community Signals for {results['slug']} at {results['checked_at']}")
-    print(f"Available Sources: {results['available_sources']}/3")
+    print(
+        f"Available Sources: {results['available_sources']}/{len(results['sources'])}"
+    )
     print("Counts:")
     for src_name, count in results["counts"].items():
         print(f"  - {src_name}: {count}")

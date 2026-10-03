@@ -109,6 +109,12 @@
   adapter: last30days:search
   operations: [search, discussion]
 
+# Reddit is read through app-only OAuth (scripts/community_signals.py) and, when
+# that is unconfigured, through the Arctic Shift archive. A logged-in browser
+# session is NOT an accepted route here: driving reddit.com under a personal
+# account masks automated access and mixes an app with a human account, both of
+# which Reddit's Responsible Builder Policy prohibits, and the penalty lands on
+# the user's own account. See .procoder/adr/0014-no-logged-in-reddit-automation.md.
 - id: reddit
   class: community
   capability: reddit-skill
