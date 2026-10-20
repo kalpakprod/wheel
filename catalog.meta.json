@@ -1,18 +1,18 @@
 {
   "emerging_gems": 71,
   "from_curated_lists": 180,
-  "generated_at": "2026-10-19T08:07:22Z",
+  "generated_at": "2026-10-20T07:57:19Z",
   "kinds": {
-    "design-system": 45,
-    "mcp-server": 101,
-    "plugin": 51,
+    "design-system": 38,
+    "mcp-server": 103,
+    "plugin": 50,
     "reference": 10,
-    "repository": 73,
+    "repository": 79,
     "service": 86,
     "skill": 34
   },
   "observed_gems": 81,
-  "observed_records": 531,
+  "observed_records": 529,
   "previous_records": 400,
   "records": 400,
   "schema_version": 1,
@@ -30,5 +30,5 @@
     "github-search:rising-developer-tools",
     "github-search:rising-mcp-servers"
   ],
-  "with_momentum": 359
+  "with_momentum": 360
 }
