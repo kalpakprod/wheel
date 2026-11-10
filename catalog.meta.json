@@ -1,18 +1,18 @@
 {
   "emerging_gems": 69,
   "from_curated_lists": 180,
-  "generated_at": "2026-11-09T10:27:27Z",
+  "generated_at": "2026-11-10T10:31:24Z",
   "kinds": {
     "design-system": 42,
-    "mcp-server": 97,
+    "mcp-server": 99,
     "plugin": 47,
     "reference": 10,
-    "repository": 79,
-    "service": 88,
-    "skill": 37
+    "repository": 80,
+    "service": 87,
+    "skill": 35
   },
-  "observed_gems": 86,
-  "observed_records": 533,
+  "observed_gems": 85,
+  "observed_records": 532,
   "previous_records": 400,
   "records": 400,
   "schema_version": 1,
